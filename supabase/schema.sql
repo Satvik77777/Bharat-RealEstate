@@ -1011,3 +1011,31 @@ AS $$
 $$;
 
 GRANT EXECUTE ON FUNCTION public.ping() TO anon, authenticated;
+
+-- ---------------------------------------------------------------------
+-- 11. DIRECT ACCESS / NO-LOGIN PORTAL PERMISSIONS
+-- ---------------------------------------------------------------------
+GRANT USAGE ON SCHEMA public TO anon;
+GRANT SELECT, INSERT, UPDATE ON public.sectors TO anon;
+GRANT SELECT, INSERT, UPDATE ON public.property_types TO anon;
+GRANT SELECT, INSERT, UPDATE ON public.properties TO anon;
+GRANT SELECT, INSERT, UPDATE ON public.buyers TO anon;
+GRANT SELECT, INSERT, UPDATE ON public.property_contacts TO anon;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO anon;
+
+DROP POLICY IF EXISTS "anon_sectors_all" ON public.sectors;
+CREATE POLICY "anon_sectors_all" ON public.sectors FOR ALL TO anon USING (TRUE) WITH CHECK (TRUE);
+
+DROP POLICY IF EXISTS "anon_types_all" ON public.property_types;
+CREATE POLICY "anon_types_all" ON public.property_types FOR ALL TO anon USING (TRUE) WITH CHECK (TRUE);
+
+DROP POLICY IF EXISTS "anon_properties_all" ON public.properties;
+CREATE POLICY "anon_properties_all" ON public.properties FOR ALL TO anon USING (TRUE) WITH CHECK (TRUE);
+
+DROP POLICY IF EXISTS "anon_buyers_all" ON public.buyers;
+CREATE POLICY "anon_buyers_all" ON public.buyers FOR ALL TO anon USING (TRUE) WITH CHECK (TRUE);
+
+DROP POLICY IF EXISTS "anon_contacts_all" ON public.property_contacts;
+CREATE POLICY "anon_contacts_all" ON public.property_contacts FOR ALL TO anon USING (TRUE) WITH CHECK (TRUE);
+
