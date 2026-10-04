@@ -998,3 +998,16 @@ $$;
 
 REVOKE ALL ON FUNCTION public.export_all() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.export_all() TO authenticated;
+
+-- ---------------------------------------------------------------------
+-- 10. KEEP-ALIVE PING FUNCTION (PREVENTS SUPABASE FREE-TIER 7-DAY PAUSING)
+-- ---------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.ping()
+RETURNS integer
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+  SELECT 1;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.ping() TO anon, authenticated;
