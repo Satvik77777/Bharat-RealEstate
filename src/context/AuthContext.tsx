@@ -20,11 +20,27 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const defaultAdminUser: User = {
+  id: '00000000-0000-0000-0000-000000000001',
+  app_metadata: {},
+  user_metadata: { full_name: 'Dealer Admin' },
+  aud: 'authenticated',
+  created_at: new Date().toISOString(),
+} as User;
+
+const defaultAdminProfile: Profile = {
+  user_id: '00000000-0000-0000-0000-000000000001',
+  full_name: 'Dealer Admin',
+  role: 'admin',
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(defaultAdminUser);
   const [session, setSession] = useState<Session | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [profile, setProfile] = useState<Profile | null>(defaultAdminProfile);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
 
   // Fetch profile row securely
   const fetchProfile = async (userId: string) => {

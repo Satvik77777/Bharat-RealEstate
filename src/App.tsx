@@ -5,7 +5,6 @@ import { ThemeProvider } from './context/ThemeContext';
 import { ToastProvider } from './context/ToastContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Layout } from './components/Layout';
-import { Login } from './pages/Login';
 import { AddProperty } from './pages/AddProperty';
 import { SearchProperties } from './pages/SearchProperties';
 import { BuyerRequirements } from './pages/BuyerRequirements';
@@ -18,8 +17,8 @@ export const App: React.FC = () => {
         <AuthProvider>
           <BrowserRouter>
             <Routes>
-              {/* Public Login Route */}
-              <Route path="/login" element={<Login />} />
+              {/* Direct Dashboard Access - No login required */}
+              <Route path="/login" element={<Navigate to="/search" replace />} />
 
               {/* All Protected Routes */}
               <Route element={<ProtectedRoute />}>

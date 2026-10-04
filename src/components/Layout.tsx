@@ -1,11 +1,10 @@
 import React from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet } from 'react-router-dom';
 import {
   PlusCircle,
   Search,
   Users,
   Settings as SettingsIcon,
-  LogOut,
   Moon,
   Sun,
   Building2,
@@ -16,14 +15,8 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
 export const Layout: React.FC = () => {
-  const { isAdmin, logout } = useAuth();
+  const { isAdmin } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const navigate = useNavigate();
-
-  const handleLogout = async () => {
-    await logout();
-    navigate('/login');
-  };
 
   const navItems = [
     { to: '/add', label: 'Add Property', icon: PlusCircle },
@@ -99,15 +92,6 @@ export const Layout: React.FC = () => {
                 </>
               )}
             </div>
-
-            <button
-              onClick={handleLogout}
-              title="Logout"
-              className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-              aria-label="Logout"
-            >
-              <LogOut className="w-5 h-5" />
-            </button>
           </div>
         </div>
       </header>
