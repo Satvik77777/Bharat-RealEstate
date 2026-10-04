@@ -454,8 +454,8 @@ BEGIN
   SELECT jsonb_agg(row_to_json(r)) INTO v_properties
   FROM (
     SELECT
-      p.id, p.plot_no, p.plot_id, p.location, p.house_no, p.price,
-      s.name AS sector_name, t.name AS type_name, p.area_size, p.area_unit,
+      p.id, p.plot_no, p.plot_id, s.name AS sector, p.location, p.house_no, p.price,
+      t.name AS property_type, p.area_size, p.area_unit,
       p.details, p.status, c.contact_name AS owner_name, c.phone AS owner_phone,
       p.created_at, p.updated_at, p.is_deleted
     FROM public.properties p
@@ -467,7 +467,8 @@ BEGIN
 
   SELECT jsonb_agg(row_to_json(b)) INTO v_buyers
   FROM (
-    SELECT * FROM public.buyers ORDER BY created_at DESC
+    SELECT id, name, phone, budget_min, budget_max, notes, status, followup_date, created_at, updated_at, is_deleted
+    FROM public.buyers ORDER BY created_at DESC
   ) b;
 
   SELECT jsonb_agg(row_to_json(s)) INTO v_sectors
