@@ -262,7 +262,14 @@ export const SearchProperties: React.FC = () => {
         setTotalCount(0);
       }
     } catch (err: any) {
-      showToast({ type: 'error', title: 'Search Error', message: err.message || 'Failed to search properties' });
+      const isDnsOrNetwork = err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError');
+      showToast({
+        type: 'error',
+        title: isDnsOrNetwork ? 'Database Connection Error' : 'Search Error',
+        message: isDnsOrNetwork
+          ? 'Unable to reach Supabase. Please verify your Supabase Project URL in .env matches your dashboard.'
+          : (err.message || 'Failed to search properties')
+      });
     } finally {
       setIsLoading(false);
     }
