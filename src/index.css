@@ -1,0 +1,21 @@
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  body {
+    @apply antialiased bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100;
+    min-width: 320px;
+    overflow-x: hidden;
+  }
+}
+
+/* Ensure minimum tap target of 44px */
+button, a, input, select, textarea {
+  touch-action: manipulation;
+}

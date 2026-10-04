@@ -1,0 +1,32 @@
+name: Supabase Keep-Alive
+
+on:
+  schedule:
+    # Runs every 3 days at 04:00 UTC to prevent Supabase free tier inactivity pausing
+    - cron: '0 4 */3 * *'
+  workflow_dispatch: # Allows manual trigger from GitHub UI
+
+jobs:
+  ping-supabase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase Keep-Alive Function
+        run: |
+          if [ -z "${{ secrets.SUPABASE_URL }}" ] || [ -z "${{ secrets.SUPABASE_ANON_KEY }}" ]; then
+            echo "::warning ::SUPABASE_URL or SUPABASE_ANON_KEY secret is not set. Skipping keep-alive ping."
+            exit 0
+          fi
+
+          echo "Pinging Supabase database RPC ping()..."
+          RESPONSE=$(curl -s -X POST "${{ secrets.SUPABASE_URL }}/rest/v1/rpc/ping" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Content-Type: application/json")
+
+          echo "Response received: $RESPONSE"
+          if [ "$RESPONSE" = "1" ]; then
+            echo "Supabase database is alive and active."
+          else
+            echo "Unexpected response: $RESPONSE"
+            exit 1
+          fi
