@@ -9,7 +9,6 @@ import {
   Sun,
   Building2,
   ShieldCheck,
-  UserCheck,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -78,20 +77,13 @@ export const Layout: React.FC = () => {
               {theme === 'dark' ? <Sun className="w-5 h-5 text-amber-400" /> : <Moon className="w-5 h-5" />}
             </button>
 
-            {/* Role indicator */}
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wider border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800">
-              {isAdmin ? (
-                <>
-                  <ShieldCheck className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
-                  <span className="text-brand-700 dark:text-brand-300">Admin</span>
-                </>
-              ) : (
-                <>
-                  <UserCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                  <span className="text-emerald-700 dark:text-emerald-300">Staff</span>
-                </>
-              )}
-            </div>
+            {/* Role indicator (STAFF badge removed, only Admin badge shown for admins) */}
+            {isAdmin && (
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wider border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800">
+                <ShieldCheck className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
+                <span className="text-brand-700 dark:text-brand-300">Admin</span>
+              </div>
+            )}
           </div>
         </div>
       </header>

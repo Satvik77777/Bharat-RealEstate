@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Search,
-  Phone,
   MessageCircle,
   Copy,
   Download,
@@ -18,6 +17,11 @@ import {
   Layers,
   Users as UsersIcon,
   Check,
+  SlidersHorizontal,
+  ChevronDown,
+  ChevronUp,
+  X,
+  MapPin,
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useToast } from '../context/ToastContext';
@@ -48,17 +52,29 @@ export const SearchProperties: React.FC = () => {
   const [maxPriceVal, setMaxPriceVal] = useState(searchParams.get('maxP') || '');
   const [maxPriceUnit, setMaxPriceUnit] = useState<PriceUnit>((searchParams.get('maxU') as PriceUnit) || 'Cr');
 
-  const [selectedSector, setSelectedSector] = useState(searchParams.get('sector') || '');
+  const [sectorInput, setSectorInput] = useState(searchParams.get('sector') || '');
+  const [isSectorDropdownOpen, setIsSectorDropdownOpen] = useState(false);
   const [selectedTypes, setSelectedTypes] = useState<string[]>(
     searchParams.get('types') ? searchParams.get('types')!.split(',').filter(Boolean) : []
   );
-  const [selectedStatus, setSelectedStatus] = useState<string>(searchParams.get('status') || 'available');
-  const [plotIdSearch, setPlotIdSearch] = useState(searchParams.get('plotId') || '');
   const [sortBy, setSortBy] = useState<string>(searchParams.get('sort') || 'newest');
   const [currentPage, setCurrentPage] = useState<number>(Number(searchParams.get('page')) || 1);
 
   // Phone visibility security toggle (default false - ensures phone is absent from response)
   const [showPhone, setShowPhone] = useState(searchParams.get('showPhone') === 'true');
+
+  // Mobile collapsible filter drawer toggle
+  const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
+
+  // Active filter count for mobile badge
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (minPriceVal) count++;
+    if (maxPriceVal) count++;
+    if (sectorInput.trim()) count++;
+    if (selectedTypes.length > 0) count += selectedTypes.length;
+    return count;
+  }, [minPriceVal, maxPriceVal, sectorInput, selectedTypes]);
 
   // Query Results
   const [properties, setProperties] = useState<Property[]>([]);
@@ -67,6 +83,13 @@ export const SearchProperties: React.FC = () => {
 
   // Selected for WhatsApp sharing / export
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Filtered sectors for live interactive autocomplete dropdown (e.g. typing "sec" or "moh")
+  const filteredSectors = useMemo(() => {
+    if (!sectorInput.trim()) return sectors.slice(0, 10);
+    const q = sectorInput.trim().toLowerCase();
+    return sectors.filter((s) => s.name.toLowerCase().includes(q)).slice(0, 15);
+  }, [sectors, sectorInput]);
 
   // Quick range chips configuration
   const quickRanges = [
@@ -161,10 +184,8 @@ export const SearchProperties: React.FC = () => {
       params.set('maxP', maxPriceVal);
       params.set('maxU', maxPriceUnit);
     }
-    if (selectedSector) params.set('sector', selectedSector);
+    if (sectorInput.trim()) params.set('sector', sectorInput.trim());
     if (selectedTypes.length > 0) params.set('types', selectedTypes.join(','));
-    if (selectedStatus) params.set('status', selectedStatus);
-    if (plotIdSearch.trim()) params.set('plotId', plotIdSearch.trim());
     if (sortBy !== 'newest') params.set('sort', sortBy);
     if (currentPage > 1) params.set('page', String(currentPage));
     if (showPhone) params.set('showPhone', 'true');
@@ -175,10 +196,8 @@ export const SearchProperties: React.FC = () => {
     minPriceUnit,
     maxPriceVal,
     maxPriceUnit,
-    selectedSector,
+    sectorInput,
     selectedTypes,
-    selectedStatus,
-    plotIdSearch,
     sortBy,
     currentPage,
     showPhone,
@@ -192,10 +211,20 @@ export const SearchProperties: React.FC = () => {
       const minRupees = parsePriceInput(minPriceVal, minPriceUnit);
       const maxRupees = parsePriceInput(maxPriceVal, maxPriceUnit);
 
-      const sectorIds = selectedSector ? [selectedSector] : null;
+      const trimmedSector = sectorInput.trim();
+      let sectorIds: string[] | null = null;
+      if (trimmedSector) {
+        const matched = sectors.filter((s) =>
+          s.name.toLowerCase().includes(trimmedSector.toLowerCase())
+        );
+        if (matched.length > 0) {
+          sectorIds = matched.map((s) => s.id);
+        } else {
+          sectorIds = ['00000000-0000-0000-0000-000000000000'];
+        }
+      }
+
       const typeIds = selectedTypes.length > 0 ? selectedTypes : null;
-      const statuses = selectedStatus ? [selectedStatus] : null;
-      const plotQuery = plotIdSearch.trim() || null;
       const limit = 20;
       const offset = (currentPage - 1) * limit;
 
@@ -206,17 +235,13 @@ export const SearchProperties: React.FC = () => {
 
         if (minRupees !== null) filtered = filtered.filter((p) => p.price >= minRupees);
         if (maxRupees !== null) filtered = filtered.filter((p) => p.price <= maxRupees);
-        if (sectorIds) filtered = filtered.filter((p) => sectorIds.includes(p.sector_id));
-        if (typeIds) filtered = filtered.filter((p) => typeIds.includes(p.type_id));
-        if (statuses) filtered = filtered.filter((p) => statuses.includes(p.status));
-        if (plotQuery) {
-          const q = plotQuery.toLowerCase().replace(/^p-?/, '');
+        if (trimmedSector) {
+          const q = trimmedSector.toLowerCase();
           filtered = filtered.filter(
-            (p) =>
-              p.plot_id.toLowerCase().includes(plotQuery.toLowerCase()) ||
-              String(p.plot_no) === q
+            (p) => p.sector_name?.toLowerCase().includes(q) || p.location?.toLowerCase().includes(q)
           );
         }
+        if (typeIds) filtered = filtered.filter((p) => typeIds.includes(p.type_id));
 
         // Sorting
         filtered.sort((a, b) => {
@@ -243,8 +268,8 @@ export const SearchProperties: React.FC = () => {
         p_max_price: maxRupees,
         p_sector_ids: sectorIds,
         p_type_ids: typeIds,
-        p_statuses: statuses,
-        p_plot_id: plotQuery,
+        p_statuses: ['available'],
+        p_plot_id: null,
         p_include_phone: showPhone, // Controls whether property_contacts is joined or returned as NULL
         p_sort: sortBy,
         p_limit: limit,
@@ -278,10 +303,9 @@ export const SearchProperties: React.FC = () => {
     minPriceUnit,
     maxPriceVal,
     maxPriceUnit,
-    selectedSector,
+    sectorInput,
+    sectors,
     selectedTypes,
-    selectedStatus,
-    plotIdSearch,
     showPhone,
     sortBy,
     currentPage,
@@ -309,10 +333,8 @@ export const SearchProperties: React.FC = () => {
   const handleFetchAll = () => {
     setMinPriceVal('');
     setMaxPriceVal('');
-    setSelectedSector('');
+    setSectorInput('');
     setSelectedTypes([]);
-    setSelectedStatus('');
-    setPlotIdSearch('');
     setCurrentPage(1);
   };
 
@@ -320,10 +342,8 @@ export const SearchProperties: React.FC = () => {
   const handleReset = () => {
     setMinPriceVal('');
     setMaxPriceVal('');
-    setSelectedSector('');
+    setSectorInput('');
     setSelectedTypes([]);
-    setSelectedStatus('available');
-    setPlotIdSearch('');
     setShowPhone(false);
     setSortBy('newest');
     setCurrentPage(1);
@@ -396,6 +416,42 @@ export const SearchProperties: React.FC = () => {
       showToast({ type: 'success', title: 'Copied!', message: 'Formatted property message copied to clipboard' });
     } catch {
       showToast({ type: 'error', title: 'Copy Failed', message: 'Could not access clipboard' });
+    }
+  };
+
+  // Fast 1-Tap Copy Single Property Data (Includes phone only if showPhone is checked)
+  const handleCopySingleProperty = async (p: Property) => {
+    const lines = [
+      `Plot ID: ${p.plot_id}`,
+      `Type: ${p.type_name || 'Property'}`,
+      `Sector: ${p.sector_name || 'N/A'}`,
+      `Location: ${p.location}${p.house_no ? ` (${p.house_no})` : ''}`,
+      `Price: ${formatPrice(p.price)}`,
+      p.area_size ? `Area: ${p.area_size} ${p.area_unit || ''}` : null,
+      `Status: ${p.status ? p.status.toUpperCase() : 'AVAILABLE'}`,
+      p.details ? `Details: ${p.details}` : null,
+      ...(showPhone && p.phone
+        ? [
+            `Owner: ${p.contact_name || 'Owner'}`,
+            `Contact: ${normalizePhone(p.phone).formatted || p.phone}`,
+          ]
+        : []),
+    ].filter(Boolean);
+
+    const textToCopy = lines.join('\n');
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      showToast({
+        type: 'success',
+        title: 'Copied!',
+        message: `Plot ${p.plot_id} data copied to clipboard`,
+      });
+    } catch {
+      showToast({
+        type: 'error',
+        title: 'Copy Failed',
+        message: 'Could not access clipboard',
+      });
     }
   };
 
@@ -485,159 +541,81 @@ export const SearchProperties: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Filter & Search Control Panel */}
-      <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-md space-y-5">
-        {/* Quick Range Chips (Fills boxes so user sees exact numbers) */}
-        <div>
-          <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2 block">
-            Quick Budget Filters
-          </span>
-          <div className="flex flex-wrap gap-2">
-            {quickRanges.map((range, idx) => (
+      {/* Mobile Streamlined Filter Bar (Collapsible Drawer Trigger) */}
+      <div className="md:hidden bg-white dark:bg-slate-900 rounded-2xl p-3 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setIsMobileFiltersOpen(!isMobileFiltersOpen)}
+          className="flex-1 flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-semibold hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors min-h-[44px]"
+        >
+          <div className="flex items-center gap-2">
+            <SlidersHorizontal className="w-4 h-4 text-brand-600 dark:text-brand-400" />
+            <span>Search Filters</span>
+            {activeFiltersCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-brand-600 text-white text-[10px] font-bold">
+                {activeFiltersCount}
+              </span>
+            )}
+          </div>
+          {isMobileFiltersOpen ? (
+            <ChevronUp className="w-4 h-4 text-slate-400" />
+          ) : (
+            <ChevronDown className="w-4 h-4 text-slate-400" />
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={handleFetchAll}
+          className="px-3.5 py-2.5 rounded-xl text-xs font-semibold bg-brand-50 text-brand-700 dark:bg-brand-950/60 dark:text-brand-300 hover:bg-brand-100 dark:hover:bg-brand-900/40 min-h-[44px] whitespace-nowrap"
+        >
+          Fetch All
+        </button>
+      </div>
+
+      {/* Main Filter & Search Control Panel (Collapsible Drawer on Mobile, Full on Desktop) */}
+      <div
+        className={`${
+          isMobileFiltersOpen ? 'block' : 'hidden'
+        } md:block bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-md space-y-5 transition-all`}
+      >
+        {/* Mobile Header Inside Filter Drawer with Close Button */}
+        <div className="flex md:hidden items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-2">
+            <SlidersHorizontal className="w-4 h-4 text-brand-600 dark:text-brand-400" />
+            <span className="text-sm font-bold text-slate-900 dark:text-white">Filter Properties</span>
+            {activeFiltersCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-brand-100 dark:bg-brand-950 text-brand-700 dark:text-brand-300 text-xs font-bold">
+                {activeFiltersCount} Active
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsMobileFiltersOpen(false)}
+            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 min-h-[38px] min-w-[38px] flex items-center justify-center"
+            aria-label="Close filters"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        {/* 1. Property Types (Multi-Select) - Natural Pill Tags */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+              Property Types <span className="text-slate-400 font-normal">(Multi-Select)</span>
+            </span>
+            {selectedTypes.length > 0 && (
               <button
-                key={idx}
                 type="button"
-                onClick={() => handleQuickRange(range)}
-                className="py-1.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:border-brand-500 hover:bg-brand-50 dark:hover:bg-brand-950/40 text-xs font-semibold transition-all min-h-[40px]"
+                onClick={() => setSelectedTypes([])}
+                className="text-xs text-brand-600 dark:text-brand-400 hover:underline font-semibold"
               >
-                {range.label}
+                Clear all ({selectedTypes.length})
               </button>
-            ))}
+            )}
           </div>
-        </div>
-
-        {/* Price Min/Max Inputs */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
-              Minimum Price (Inclusive)
-            </label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="e.g. 50 or 1"
-                value={minPriceVal}
-                onChange={(e) => {
-                  setMinPriceVal(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="flex-1 py-2 px-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
-              />
-              <select
-                value={minPriceUnit}
-                onChange={(e) => {
-                  setMinPriceUnit(e.target.value as PriceUnit);
-                  setCurrentPage(1);
-                }}
-                className="w-24 py-2 px-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold dark:text-white"
-              >
-                <option value="Lakh">Lakh</option>
-                <option value="Cr">Cr</option>
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
-              Maximum Price (Inclusive)
-            </label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="e.g. 1 or 2"
-                value={maxPriceVal}
-                onChange={(e) => {
-                  setMaxPriceVal(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="flex-1 py-2 px-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
-              />
-              <select
-                value={maxPriceUnit}
-                onChange={(e) => {
-                  setMaxPriceUnit(e.target.value as PriceUnit);
-                  setCurrentPage(1);
-                }}
-                className="w-24 py-2 px-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold dark:text-white"
-              >
-                <option value="Cr">Cr</option>
-                <option value="Lakh">Lakh</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        {/* Sector, Plot ID Search, and Status */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {/* Sector (Searchable select) */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
-              Sector / Colony
-            </label>
-            <select
-              value={selectedSector}
-              onChange={(e) => {
-                setSelectedSector(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="w-full py-2.5 px-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
-            >
-              <option value="">All Sectors</option>
-              {sectors.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Plot ID Search (accepts P-0012, p0012, or 12) */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
-              Plot ID Search
-            </label>
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="e.g. P-0012, p12, or 12"
-                value={plotIdSearch}
-                onChange={(e) => {
-                  setPlotIdSearch(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full py-2.5 px-3.5 pl-9 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white font-mono"
-              />
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-            </div>
-          </div>
-
-          {/* Status Filter */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
-              Status
-            </label>
-            <select
-              value={selectedStatus}
-              onChange={(e) => {
-                setSelectedStatus(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="w-full py-2.5 px-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
-            >
-              <option value="">All Statuses</option>
-              <option value="available">Available Only</option>
-              <option value="hold">On Hold</option>
-              <option value="sold">Sold</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Multi-select Property Types */}
-        <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-            Property Types (Multi-Select)
-          </label>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {propertyTypes.map((type) => {
               const active = selectedTypes.includes(type.id);
               return (
@@ -645,17 +623,188 @@ export const SearchProperties: React.FC = () => {
                   key={type.id}
                   type="button"
                   onClick={() => toggleType(type.id)}
-                  className={`py-1.5 px-3 rounded-xl border text-xs font-medium flex items-center gap-1.5 transition-all min-h-[38px] ${
+                  className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition-all select-none border min-h-[38px] ${
                     active
-                      ? 'border-brand-600 bg-brand-50 text-brand-700 dark:bg-brand-950/60 dark:text-brand-300 dark:border-brand-500 font-semibold'
-                      : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300'
+                      ? 'border-brand-600 bg-brand-600 text-white shadow-md shadow-brand-500/25 ring-2 ring-brand-500/30'
+                      : 'border-slate-200 dark:border-slate-700/80 bg-slate-100/70 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-white dark:hover:bg-slate-800'
                   }`}
                 >
-                  {active && <Check className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />}
+                  {active && <Check className="w-3.5 h-3.5 text-white shrink-0 stroke-[3]" />}
                   <span>{type.name}</span>
                 </button>
               );
             })}
+          </div>
+        </div>
+
+        {/* 2. Quick Budget Filters - Sleek Pill Tags */}
+        <div className="space-y-2">
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block">
+            Quick Budget Filters
+          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            {quickRanges.map((range, idx) => {
+              const isActive =
+                minPriceVal === range.minVal &&
+                minPriceUnit === range.minUnit &&
+                maxPriceVal === range.maxVal &&
+                maxPriceUnit === range.maxUnit;
+
+              return (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => handleQuickRange(range)}
+                  className={`px-3.5 py-1.5 rounded-full border text-xs font-semibold transition-all min-h-[34px] flex items-center justify-center ${
+                    isActive
+                      ? 'border-brand-600 bg-brand-600 text-white shadow-sm'
+                      : 'border-slate-200 dark:border-slate-700/70 bg-slate-50 dark:bg-slate-800/40 text-slate-600 dark:text-slate-300 hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-300'
+                  }`}
+                >
+                  <span>{range.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 3. Balanced 2-Column Row: Sector / Colony (Left) & Price Range (Right) */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 pt-1">
+          {/* Left Column: Sector / Colony (Input with Dropdown Suggestions) */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Sector / Colony
+              </label>
+              <span className="text-[11px] text-slate-400">Type or pick from list</span>
+            </div>
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="e.g. Mohan Nagar, Sector 3, Sector 14..."
+                value={sectorInput}
+                onFocus={() => setIsSectorDropdownOpen(true)}
+                onBlur={() => {
+                  setTimeout(() => setIsSectorDropdownOpen(false), 200);
+                }}
+                onChange={(e) => {
+                  setSectorInput(e.target.value);
+                  setIsSectorDropdownOpen(true);
+                  setCurrentPage(1);
+                }}
+                className="w-full py-2.5 px-3.5 pl-9 pr-9 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white font-medium"
+              />
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+              {sectorInput && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSectorInput('');
+                    setIsSectorDropdownOpen(false);
+                    setCurrentPage(1);
+                  }}
+                  className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                  title="Clear sector"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+
+              {/* Instant Suggestion Dropdown as user types */}
+              {isSectorDropdownOpen && filteredSectors.length > 0 && (
+                <div className="absolute z-30 left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden py-1 max-h-60 overflow-y-auto">
+                  <div className="px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-800/80">
+                    {sectorInput.trim() ? `Matching Sectors (${filteredSectors.length})` : 'All Available Sectors'}
+                  </div>
+                  {filteredSectors.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        setSectorInput(s.name);
+                        setIsSectorDropdownOpen(false);
+                        setCurrentPage(1);
+                      }}
+                      className="w-full px-3.5 py-2.5 text-left text-xs sm:text-sm hover:bg-brand-50 dark:hover:bg-slate-800/80 flex items-center justify-between transition-colors group cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-6 h-6 rounded-lg bg-slate-100 dark:bg-slate-800 group-hover:bg-brand-100 dark:group-hover:bg-brand-950 flex items-center justify-center text-slate-500 group-hover:text-brand-600 transition-colors">
+                          <MapPin className="w-3.5 h-3.5" />
+                        </div>
+                        <span className="font-semibold text-slate-800 dark:text-slate-200 group-hover:text-brand-600 dark:group-hover:text-brand-400">
+                          {s.name}
+                        </span>
+                      </div>
+                      <span className="text-[10px] uppercase font-bold text-slate-400 group-hover:text-brand-500 tracking-wider">
+                        Select
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right Column: Price Range (Min & Max with Lakh/Cr) */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Price Range (Inclusive)
+              </label>
+              <span className="text-[11px] text-slate-400">Min to Max</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2.5">
+              {/* Min Price */}
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  placeholder="Min (e.g. 50)"
+                  value={minPriceVal}
+                  onChange={(e) => {
+                    setMinPriceVal(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="flex-1 min-w-0 py-2.5 px-3 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
+                />
+                <select
+                  value={minPriceUnit}
+                  onChange={(e) => {
+                    setMinPriceUnit(e.target.value as PriceUnit);
+                    setCurrentPage(1);
+                  }}
+                  className="w-20 py-2.5 px-1.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold dark:text-white text-center"
+                >
+                  <option value="Lakh">Lakh</option>
+                  <option value="Cr">Cr</option>
+                </select>
+              </div>
+
+              {/* Max Price */}
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  placeholder="Max (e.g. 2)"
+                  value={maxPriceVal}
+                  onChange={(e) => {
+                    setMaxPriceVal(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="flex-1 min-w-0 py-2.5 px-3 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
+                />
+                <select
+                  value={maxPriceUnit}
+                  onChange={(e) => {
+                    setMaxPriceUnit(e.target.value as PriceUnit);
+                    setCurrentPage(1);
+                  }}
+                  className="w-20 py-2.5 px-1.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold dark:text-white text-center"
+                >
+                  <option value="Cr">Cr</option>
+                  <option value="Lakh">Lakh</option>
+                </select>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -703,6 +852,17 @@ export const SearchProperties: React.FC = () => {
               <span>Export CSV</span>
             </button>
           </div>
+        </div>
+
+        {/* Mobile Done / Apply Button */}
+        <div className="pt-2 md:hidden">
+          <button
+            type="button"
+            onClick={() => setIsMobileFiltersOpen(false)}
+            className="w-full py-2.5 px-4 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs transition-colors min-h-[44px] shadow-sm"
+          >
+            Apply Filters & View Results
+          </button>
         </div>
       </div>
 
@@ -825,17 +985,29 @@ export const SearchProperties: React.FC = () => {
                       </span>
                     </div>
 
-                    <span
-                      className={`text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
-                        p.status === 'available'
-                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                          : p.status === 'hold'
-                          ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
-                          : 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
-                      }`}
-                    >
-                      {p.status}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleCopySingleProperty(p)}
+                        title="Copy property data to clipboard"
+                        className="py-1 px-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-brand-500 hover:text-brand-600 dark:hover:text-brand-400 text-xs font-medium flex items-center gap-1 transition-colors min-h-[30px]"
+                      >
+                        <Copy className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
+                        <span>Copy Data</span>
+                      </button>
+
+                      <span
+                        className={`text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
+                          p.status === 'available'
+                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                            : p.status === 'hold'
+                            ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+                            : 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                        }`}
+                      >
+                        {p.status}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="mt-2 space-y-1">
@@ -871,26 +1043,23 @@ export const SearchProperties: React.FC = () => {
                       <div>
                         <span className="text-[11px] text-slate-400 block">Owner Contact</span>
                         <span className="text-xs font-semibold">{p.contact_name || 'Owner'}</span>
+                        {p.phone && (
+                          <span className="text-[11px] font-mono text-slate-500 block">
+                            {normalizePhone(p.phone).formatted}
+                          </span>
+                        )}
                       </div>
                       {p.phone ? (
-                        <div className="flex items-center gap-2">
-                          <a
-                            href={`tel:${cleanContactPhone}`}
-                            className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 min-h-[44px] min-w-[44px] flex items-center justify-center"
-                            title="Call Owner"
-                          >
-                            <Phone className="w-4 h-4 text-emerald-600" />
-                          </a>
-                          <a
-                            href={`https://wa.me/91${cleanContactPhone}?text=Hello,%20inquiring%20about%20Plot%20${p.plot_id}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 min-h-[44px] min-w-[44px] flex items-center justify-center"
-                            title="WhatsApp Owner"
-                          >
-                            <MessageCircle className="w-4 h-4" />
-                          </a>
-                        </div>
+                        <a
+                          href={`https://wa.me/91${cleanContactPhone}?text=Hello,%20inquiring%20about%20Plot%20${p.plot_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-colors min-h-[40px]"
+                          title="WhatsApp Owner"
+                        >
+                          <MessageCircle className="w-4 h-4" />
+                          <span>WhatsApp</span>
+                        </a>
                       ) : (
                         <span className="text-xs text-slate-400">No phone</span>
                       )}
@@ -927,6 +1096,7 @@ export const SearchProperties: React.FC = () => {
                   <th className="py-3 px-4">Area</th>
                   <th className="py-3 px-4">Status</th>
                   {showPhone && <th className="py-3 px-4">Owner Phone</th>}
+                  <th className="py-3 px-4 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -988,20 +1158,14 @@ export const SearchProperties: React.FC = () => {
                             <div className="flex items-center gap-2">
                               <span className="font-mono text-xs">{normalizePhone(p.phone).formatted}</span>
                               <a
-                                href={`tel:${cleanPhone}`}
-                                title="Call"
-                                className="p-1 rounded text-slate-400 hover:text-emerald-600 min-h-[44px] min-w-[44px] flex items-center justify-center"
-                              >
-                                <Phone className="w-3.5 h-3.5" />
-                              </a>
-                              <a
                                 href={`https://wa.me/91${cleanPhone}?text=Hello,%20inquiring%20about%20Plot%20${p.plot_id}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                title="WhatsApp"
-                                className="p-1 rounded text-slate-400 hover:text-emerald-600 min-h-[44px] min-w-[44px] flex items-center justify-center"
+                                title="WhatsApp Owner"
+                                className="py-1 px-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-xs font-medium flex items-center gap-1 min-h-[36px] transition-colors"
                               >
                                 <MessageCircle className="w-3.5 h-3.5" />
+                                <span>WhatsApp</span>
                               </a>
                             </div>
                           ) : (
@@ -1009,6 +1173,17 @@ export const SearchProperties: React.FC = () => {
                           )}
                         </td>
                       )}
+                      <td className="py-3 px-4 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handleCopySingleProperty(p)}
+                          title="Copy property data to clipboard"
+                          className="inline-flex items-center gap-1.5 py-1 px-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-brand-500 hover:text-brand-600 dark:hover:text-brand-400 text-xs font-semibold transition-colors min-h-[34px]"
+                        >
+                          <Copy className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
+                          <span>Copy Data</span>
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}

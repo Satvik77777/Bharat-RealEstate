@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Users,
   Search,
@@ -12,6 +12,8 @@ import {
   Check,
   Clock,
   Building,
+  MapPin,
+  X,
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -43,6 +45,97 @@ export const BuyerRequirements: React.FC = () => {
   const [notes, setNotes] = useState('');
   const [status, setStatus] = useState<'active' | 'closed'>('active');
   const [followupDate, setFollowupDate] = useState('');
+
+  // Specific sector input and dropdown state
+  const [sectorInput, setSectorInput] = useState('');
+  const [isSectorDropdownOpen, setIsSectorDropdownOpen] = useState(false);
+
+  // Filtered sectors for live interactive autocomplete dropdown
+  const filteredSectors = useMemo(() => {
+    if (!sectorInput.trim()) return sectors.slice(0, 10);
+    const q = sectorInput.trim().toLowerCase();
+    return sectors.filter((s) => s.name.toLowerCase().includes(q)).slice(0, 15);
+  }, [sectors, sectorInput]);
+
+  // Quick range chips configuration
+  const quickRanges = [
+    { label: 'Up to 50 Lakh', minVal: '', minUnit: 'Lakh', maxVal: '50', maxUnit: 'Lakh' },
+    { label: '50 Lakh to 1 Cr', minVal: '50', minUnit: 'Lakh', maxVal: '1', maxUnit: 'Cr' },
+    { label: '1 to 2 Cr', minVal: '1', minUnit: 'Cr', maxVal: '2', maxUnit: 'Cr' },
+    { label: '2 to 5 Cr', minVal: '2', minUnit: 'Cr', maxVal: '5', maxUnit: 'Cr' },
+    { label: '5 Cr and above', minVal: '5', minUnit: 'Cr', maxVal: '', maxUnit: 'Cr' },
+  ];
+
+  const handleQuickRange = (range: (typeof quickRanges)[number]) => {
+    if (
+      minBudgetVal === range.minVal &&
+      minBudgetUnit === range.minUnit &&
+      maxBudgetVal === range.maxVal &&
+      maxBudgetUnit === range.maxUnit
+    ) {
+      setMinBudgetVal('');
+      setMaxBudgetVal('');
+    } else {
+      setMinBudgetVal(range.minVal);
+      setMinBudgetUnit(range.minUnit as PriceUnit);
+      setMaxBudgetVal(range.maxVal);
+      setMaxBudgetUnit(range.maxUnit as PriceUnit);
+    }
+  };
+
+  const handleSelectSector = (secId: string) => {
+    if (!selectedSectors.includes(secId)) {
+      setSelectedSectors((prev) => [...prev, secId]);
+    }
+    setSectorInput('');
+    setIsSectorDropdownOpen(false);
+  };
+
+  const handleAddCustomSector = async () => {
+    const cleanName = sectorInput.trim();
+    if (!cleanName) return;
+
+    const match = sectors.find((s) => s.name.toLowerCase() === cleanName.toLowerCase());
+    if (match) {
+      handleSelectSector(match.id);
+      return;
+    }
+
+    try {
+      if (!isSupabaseConfigured) {
+        const newSec: Sector = {
+          id: 'sec-' + Date.now(),
+          name: cleanName,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          is_deleted: false,
+        };
+        setSectors((prev) => [...prev, newSec]);
+        setSelectedSectors((prev) => [...prev, newSec.id]);
+        setSectorInput('');
+        setIsSectorDropdownOpen(false);
+        showToast({ type: 'success', title: 'Area Added', message: `Added "${cleanName}"` });
+        return;
+      }
+
+      const { data: newSecData, error: secError } = await supabase
+        .from('sectors')
+        .insert({ name: cleanName })
+        .select('id, name')
+        .single();
+
+      if (secError) throw secError;
+      if (newSecData) {
+        setSectors((prev) => [...prev, newSecData as Sector]);
+        setSelectedSectors((prev) => [...prev, newSecData.id]);
+        setSectorInput('');
+        setIsSectorDropdownOpen(false);
+        showToast({ type: 'success', title: 'Area Added', message: `Added "${cleanName}"` });
+      }
+    } catch (err: any) {
+      showToast({ type: 'error', title: 'Error', message: err.message || 'Could not add area' });
+    }
+  };
 
   // Editing state
   const [editingBuyerId, setEditingBuyerId] = useState<string | null>(null);
@@ -127,6 +220,8 @@ export const BuyerRequirements: React.FC = () => {
     setNotes('');
     setStatus('active');
     setFollowupDate('');
+    setSectorInput('');
+    setIsSectorDropdownOpen(false);
     setErrors({});
     setEditingBuyerId(null);
   };
@@ -295,6 +390,8 @@ export const BuyerRequirements: React.FC = () => {
     setNotes(buyer.notes || '');
     setStatus(buyer.status);
     setFollowupDate(buyer.followup_date || '');
+    setSectorInput('');
+    setIsSectorDropdownOpen(false);
 
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -460,7 +557,62 @@ export const BuyerRequirements: React.FC = () => {
         </h2>
 
         <form onSubmit={handleSaveBuyer} className="space-y-5">
-          {/* Name & Mobile */}
+          {/* Property Type Radio Buttons (Full Width, 1-Click Select) */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Preferred Property Type
+              </label>
+              <span className="text-[11px] text-slate-400">1-click radio select</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {/* Option 1: Any Property Type */}
+              <label
+                className={`flex-1 min-w-[120px] sm:min-w-[130px] flex items-center justify-center gap-2 py-2 px-3 rounded-xl border text-xs sm:text-sm font-medium cursor-pointer transition-all select-none text-center ${
+                  selectedTypes.length === 0
+                    ? 'border-brand-600 bg-brand-50/90 text-brand-700 dark:bg-brand-950/70 dark:border-brand-500 dark:text-brand-200 shadow-sm font-semibold ring-1 ring-brand-500/20'
+                    : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 bg-slate-50/60 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="buyerPropertyTypeRadio"
+                  value=""
+                  checked={selectedTypes.length === 0}
+                  onChange={() => setSelectedTypes([])}
+                  className="w-3.5 h-3.5 text-brand-600 focus:ring-brand-500 border-slate-300 dark:border-slate-600 cursor-pointer shrink-0"
+                />
+                <span className="truncate">Any Type</span>
+              </label>
+
+              {/* Specific Property Types */}
+              {propertyTypes.map((type) => {
+                const isSelected = selectedTypes.length === 1 && selectedTypes[0] === type.id;
+                return (
+                  <label
+                    key={type.id}
+                    className={`flex-1 min-w-[120px] sm:min-w-[130px] flex items-center justify-center gap-2 py-2 px-3 rounded-xl border text-xs sm:text-sm font-medium cursor-pointer transition-all select-none text-center ${
+                      isSelected
+                        ? 'border-brand-600 bg-brand-50/90 text-brand-700 dark:bg-brand-950/70 dark:border-brand-500 dark:text-brand-200 shadow-sm font-semibold ring-1 ring-brand-500/20'
+                        : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 bg-slate-50/60 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="buyerPropertyTypeRadio"
+                      value={type.id}
+                      checked={isSelected}
+                      onChange={() => setSelectedTypes([type.id])}
+                      className="w-3.5 h-3.5 text-brand-600 focus:ring-brand-500 border-slate-300 dark:border-slate-600 cursor-pointer shrink-0"
+                    />
+                    <span className="truncate">{type.name}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 1. Client Contact Details (2 Columns) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
@@ -472,7 +624,7 @@ export const BuyerRequirements: React.FC = () => {
                 placeholder="e.g. Vikram Singhal"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className={`w-full py-2.5 px-3.5 bg-slate-50 dark:bg-slate-800 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white ${
+                className={`w-full py-2.5 px-3.5 bg-slate-50 dark:bg-slate-800 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white min-h-[42px] ${
                   errors.name ? 'border-rose-500' : 'border-slate-200 dark:border-slate-700'
                 }`}
               />
@@ -489,7 +641,7 @@ export const BuyerRequirements: React.FC = () => {
                 placeholder="10-digit number (e.g. 9812345678)"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                className={`w-full py-2.5 px-3.5 bg-slate-50 dark:bg-slate-800 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white ${
+                className={`w-full py-2.5 px-3.5 bg-slate-50 dark:bg-slate-800 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white min-h-[42px] ${
                   errors.phone ? 'border-rose-500' : 'border-slate-200 dark:border-slate-700'
                 }`}
               />
@@ -497,26 +649,56 @@ export const BuyerRequirements: React.FC = () => {
             </div>
           </div>
 
-          {/* Budget Min/Max */}
-          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-            <span className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2">
-              Budget Range (Optional)
+          {/* 2. Budget Range with Quick Budget Options directly above */}
+          <div className="space-y-2">
+            <span className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+              Budget Range <span className="text-slate-400 font-normal">(Optional)</span>
             </span>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+            {/* Quick Budget Filters */}
+            <div className="flex flex-wrap items-center gap-2">
+              {quickRanges.map((range, idx) => {
+                const isActive =
+                  minBudgetVal === range.minVal &&
+                  minBudgetUnit === range.minUnit &&
+                  maxBudgetVal === range.maxVal &&
+                  maxBudgetUnit === range.maxUnit;
+
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => handleQuickRange(range)}
+                    className={`px-3.5 py-1.5 rounded-full border text-xs font-semibold transition-all min-h-[34px] flex items-center justify-center ${
+                      isActive
+                        ? 'border-brand-600 bg-brand-600 text-white shadow-sm'
+                        : 'border-slate-200 dark:border-slate-700/70 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:border-brand-400 hover:text-brand-600 dark:hover:text-brand-300'
+                    }`}
+                  >
+                    <span>{range.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Minimum & Maximum Budget in 2 Equal Columns */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
               <div>
-                <label className="text-[11px] text-slate-500 dark:text-slate-400 mb-1 block">Minimum Budget</label>
+                <label className="text-[11px] text-slate-500 dark:text-slate-400 mb-1 block font-medium">
+                  Minimum Budget
+                </label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     placeholder="e.g. 50 or 1"
                     value={minBudgetVal}
                     onChange={(e) => setMinBudgetVal(e.target.value)}
-                    className="flex-1 py-2 px-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
+                    className="flex-1 min-w-0 py-2.5 px-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white min-h-[42px]"
                   />
                   <select
                     value={minBudgetUnit}
                     onChange={(e) => setMinBudgetUnit(e.target.value as PriceUnit)}
-                    className="w-24 py-2 px-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold dark:text-white"
+                    className="w-24 py-2.5 px-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold dark:text-white min-h-[42px]"
                   >
                     <option value="Lakh">Lakh</option>
                     <option value="Cr">Cr</option>
@@ -525,19 +707,21 @@ export const BuyerRequirements: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-[11px] text-slate-500 dark:text-slate-400 mb-1 block">Maximum Budget</label>
+                <label className="text-[11px] text-slate-500 dark:text-slate-400 mb-1 block font-medium">
+                  Maximum Budget
+                </label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     placeholder="e.g. 1.5 or 3"
                     value={maxBudgetVal}
                     onChange={(e) => setMaxBudgetVal(e.target.value)}
-                    className="flex-1 py-2 px-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
+                    className="flex-1 min-w-0 py-2.5 px-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white min-h-[42px]"
                   />
                   <select
                     value={maxBudgetUnit}
                     onChange={(e) => setMaxBudgetUnit(e.target.value as PriceUnit)}
-                    className="w-24 py-2 px-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold dark:text-white"
+                    className="w-24 py-2.5 px-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold dark:text-white min-h-[42px]"
                   >
                     <option value="Cr">Cr</option>
                     <option value="Lakh">Lakh</option>
@@ -545,87 +729,163 @@ export const BuyerRequirements: React.FC = () => {
                 </div>
               </div>
             </div>
-            {errors.budget && <p className="text-xs text-rose-500 mt-2">{errors.budget}</p>}
+            {errors.budget && <p className="text-xs text-rose-500 mt-1">{errors.budget}</p>}
           </div>
 
-          {/* Preferred Sectors (Multi) */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-              Preferred Sectors <span className="text-slate-400 font-normal">(Empty = Any Sector)</span>
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {sectors.map((s) => {
-                const isSelected = selectedSectors.includes(s.id);
-                return (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() =>
-                      setSelectedSectors((prev) =>
-                        prev.includes(s.id) ? prev.filter((id) => id !== s.id) : [...prev, s.id]
-                      )
-                    }
-                    className={`py-1.5 px-3 rounded-xl border text-xs font-medium flex items-center gap-1.5 transition-all min-h-[38px] ${
-                      isSelected
-                        ? 'border-brand-600 bg-brand-50 text-brand-700 dark:bg-brand-950/60 dark:text-brand-300 font-semibold'
-                        : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    {isSelected && <Check className="w-3 h-3 text-brand-600" />}
-                    <span>{s.name}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Preferred Property Types (Multi) */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-              Preferred Property Types <span className="text-slate-400 font-normal">(Empty = Any Type)</span>
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {propertyTypes.map((t) => {
-                const isSelected = selectedTypes.includes(t.id);
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() =>
-                      setSelectedTypes((prev) =>
-                        prev.includes(t.id) ? prev.filter((id) => id !== t.id) : [...prev, t.id]
-                      )
-                    }
-                    className={`py-1.5 px-3 rounded-xl border text-xs font-medium flex items-center gap-1.5 transition-all min-h-[38px] ${
-                      isSelected
-                        ? 'border-brand-600 bg-brand-50 text-brand-700 dark:bg-brand-950/60 dark:text-brand-300 font-semibold'
-                        : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    {isSelected && <Check className="w-3 h-3 text-brand-600" />}
-                    <span>{t.name}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Status & Follow-up Date */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
-                Client Status
+          {/* 3. Preferred Sector / Colony (Full Width with Any Sector + Specific Area Input) */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Preferred Sector / Colony <span className="text-slate-400 font-normal">(Default: Any Sector)</span>
               </label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value as 'active' | 'closed')}
-                className="w-full py-2.5 px-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm dark:text-white"
-              >
-                <option value="active">Active (Seeking Property)</option>
-                <option value="closed">Closed / Deal Done</option>
-              </select>
+              {selectedSectors.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedSectors([])}
+                  className="text-xs text-brand-600 dark:text-brand-400 hover:underline font-semibold"
+                >
+                  Reset to Any Sector
+                </button>
+              )}
             </div>
 
+            <div className="flex flex-col sm:flex-row gap-2.5">
+              {/* Default: Any Sector Button */}
+              <button
+                type="button"
+                onClick={() => setSelectedSectors([])}
+                className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-all border shrink-0 min-h-[42px] ${
+                  selectedSectors.length === 0
+                    ? 'border-brand-600 bg-brand-50 text-brand-700 dark:bg-brand-950/60 dark:text-brand-300 ring-2 ring-brand-500/20 shadow-sm'
+                    : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300'
+                }`}
+              >
+                <Check
+                  className={`w-4 h-4 ${
+                    selectedSectors.length === 0 ? 'text-brand-600 dark:text-brand-400 stroke-[3]' : 'opacity-20'
+                  }`}
+                />
+                <span>Any Sector / Colony</span>
+              </button>
+
+              {/* Specific Area Input with Live Autocomplete */}
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  placeholder="Type specific area (e.g. Mohan Nagar, Sector 7)..."
+                  value={sectorInput}
+                  onFocus={() => setIsSectorDropdownOpen(true)}
+                  onBlur={() => {
+                    setTimeout(() => setIsSectorDropdownOpen(false), 200);
+                  }}
+                  onChange={(e) => {
+                    setSectorInput(e.target.value);
+                    setIsSectorDropdownOpen(true);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (filteredSectors.length > 0) {
+                        handleSelectSector(filteredSectors[0].id);
+                      } else if (sectorInput.trim()) {
+                        handleAddCustomSector();
+                      }
+                    }
+                  }}
+                  className="w-full py-2.5 px-3.5 pl-9 pr-9 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white font-medium min-h-[42px]"
+                />
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+                {sectorInput && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSectorInput('');
+                      setIsSectorDropdownOpen(false);
+                    }}
+                    className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                    title="Clear"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+
+                {/* Suggestion Dropdown */}
+                {isSectorDropdownOpen && (
+                  <div className="absolute z-30 left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden py-1 max-h-60 overflow-y-auto">
+                    <div className="px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-800/80">
+                      {sectorInput.trim() ? `Matching Sectors (${filteredSectors.length})` : 'Popular / All Sectors'}
+                    </div>
+                    {filteredSectors.map((s) => {
+                      const isAlreadyAdded = selectedSectors.includes(s.id);
+                      return (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            handleSelectSector(s.id);
+                          }}
+                          className={`w-full text-left px-3.5 py-2 text-xs sm:text-sm flex items-center justify-between hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors ${
+                            isAlreadyAdded ? 'text-brand-600 font-semibold' : 'text-slate-700 dark:text-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                            <span>{s.name}</span>
+                          </div>
+                          {isAlreadyAdded && <Check className="w-3.5 h-3.5 text-brand-600" />}
+                        </button>
+                      );
+                    })}
+                    {sectorInput.trim() &&
+                      !sectors.some((s) => s.name.toLowerCase() === sectorInput.trim().toLowerCase()) && (
+                        <button
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            handleAddCustomSector();
+                          }}
+                          className="w-full text-left px-3.5 py-2.5 text-xs sm:text-sm flex items-center gap-2 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/40 font-semibold border-t border-slate-100 dark:border-slate-800"
+                        >
+                          <span>+ Add &quot;{sectorInput.trim()}&quot; as specific area</span>
+                        </button>
+                      )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Selected Specific Sector Badges */}
+            {selectedSectors.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Specific Areas:</span>
+                {selectedSectors.map((secId) => {
+                  const sec = sectors.find((s) => s.id === secId);
+                  if (!sec) return null;
+                  return (
+                    <span
+                      key={secId}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-brand-50 dark:bg-brand-950/60 border border-brand-200 dark:border-brand-800 text-brand-700 dark:text-brand-300 text-xs font-semibold shadow-sm"
+                    >
+                      <MapPin className="w-3 h-3 text-brand-500" />
+                      <span>{sec.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedSectors((prev) => prev.filter((id) => id !== secId))}
+                        className="hover:text-rose-500 ml-0.5 p-0.5"
+                        title="Remove"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* 4. Follow-up Date & Notes in 2 Balanced Columns */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
                 Follow-up Date <span className="text-slate-400 font-normal">(Optional)</span>
@@ -635,25 +895,24 @@ export const BuyerRequirements: React.FC = () => {
                   type="date"
                   value={followupDate}
                   onChange={(e) => setFollowupDate(e.target.value)}
-                  className="w-full py-2.5 px-3 pl-9 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm dark:text-white"
+                  className="w-full py-2.5 px-3 pl-9 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm dark:text-white min-h-[42px]"
                 />
-                <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
               </div>
             </div>
-          </div>
 
-          {/* Notes */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
-              Client Specific Preferences / Notes
-            </label>
-            <textarea
-              rows={2}
-              placeholder="e.g. Urgent requirement, prefers corner plot or park facing..."
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              className="w-full py-2.5 px-3.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm dark:text-white"
-            />
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                Client Specific Preferences / Notes
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Urgent requirement, prefers corner plot or park facing..."
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="w-full py-2.5 px-3.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm dark:text-white min-h-[42px]"
+              />
+            </div>
           </div>
 
           {/* Submit */}

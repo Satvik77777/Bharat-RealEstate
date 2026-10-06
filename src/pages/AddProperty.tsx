@@ -1,14 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Building,
-  Check,
   AlertTriangle,
   Loader2,
   Trash2,
   Edit3,
-  Plus,
   RefreshCw,
   Sparkles,
+  Calculator,
+  Compass,
+  MapPin,
+  X,
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -44,9 +46,15 @@ export const AddProperty: React.FC = () => {
   const [recentProperties, setRecentProperties] = useState<Property[]>([]);
 
   // Form State
-  const [sectorMode, setSectorMode] = useState<'select' | 'new'>('select');
-  const [selectedSectorId, setSelectedSectorId] = useState('');
-  const [newSectorName, setNewSectorName] = useState('');
+  const [sectorInput, setSectorInput] = useState('');
+  const [isSectorDropdownOpen, setIsSectorDropdownOpen] = useState(false);
+
+  // Filtered sectors for live interactive autocomplete dropdown (e.g. typing "sec" or "moh")
+  const filteredSectors = useMemo(() => {
+    if (!sectorInput.trim()) return sectors.slice(0, 10);
+    const q = sectorInput.trim().toLowerCase();
+    return sectors.filter((s) => s.name.toLowerCase().includes(q)).slice(0, 15);
+  }, [sectors, sectorInput]);
 
   const [location, setLocation] = useState('');
   const [houseNo, setHouseNo] = useState('');
@@ -59,6 +67,141 @@ export const AddProperty: React.FC = () => {
   const [ownerPhone, setOwnerPhone] = useState('');
   const [details, setDetails] = useState('');
   const [status, setStatus] = useState<PropertyStatus>('available');
+
+  // Dimensions & Rate calculation states
+  const [lengthFt, setLengthFt] = useState('');
+  const [breadthFt, setBreadthFt] = useState('');
+  const [rateValue, setRateValue] = useState('');
+  const [rateUnit, setRateUnit] = useState<'per_gaj' | 'per_sqft' | 'per_acre'>('per_gaj');
+
+  // Calculate total demand in rupees from rate and area
+  const calculateTotalDemandFromRate = (
+    rate: string,
+    rUnit: 'per_gaj' | 'per_sqft' | 'per_acre',
+    area: string,
+    aUnit: AreaUnit
+  ): number | null => {
+    const numRate = parseFloat(rate);
+    const numArea = parseFloat(area);
+    if (!numRate || isNaN(numRate) || numRate <= 0 || !numArea || isNaN(numArea) || numArea <= 0) {
+      return null;
+    }
+
+    let totalRupees = 0;
+    if (rUnit === 'per_gaj') {
+      if (aUnit === 'sq yard' || aUnit === 'gaj') {
+        totalRupees = numArea * numRate;
+      } else if (aUnit === 'sq ft') {
+        totalRupees = (numArea / 9) * numRate;
+      } else if (aUnit === 'acre') {
+        totalRupees = numArea * 4840 * numRate;
+      } else {
+        totalRupees = numArea * numRate;
+      }
+    } else if (rUnit === 'per_sqft') {
+      if (aUnit === 'sq ft') {
+        totalRupees = numArea * numRate;
+      } else if (aUnit === 'sq yard' || aUnit === 'gaj') {
+        totalRupees = numArea * 9 * numRate;
+      } else if (aUnit === 'acre') {
+        totalRupees = numArea * 43560 * numRate;
+      } else {
+        totalRupees = numArea * numRate;
+      }
+    } else if (rUnit === 'per_acre') {
+      if (aUnit === 'acre') {
+        totalRupees = numArea * numRate;
+      } else if (aUnit === 'sq yard' || aUnit === 'gaj') {
+        totalRupees = (numArea / 4840) * numRate;
+      } else {
+        totalRupees = numArea * numRate;
+      }
+    }
+
+    return Math.round(totalRupees);
+  };
+
+  // When dimensions (L x B) change, update area size and total demand
+  const handleDimensionsUpdate = (l: string, b: string, currentUnit: AreaUnit) => {
+    const numL = parseFloat(l);
+    const numB = parseFloat(b);
+    if (numL > 0 && numB > 0) {
+      const totalSqFt = numL * numB;
+      let computedArea = 0;
+      if (currentUnit === 'sq yard' || currentUnit === 'gaj') {
+        computedArea = Math.round((totalSqFt / 9) * 100) / 100;
+      } else if (currentUnit === 'sq ft') {
+        computedArea = Math.round(totalSqFt * 100) / 100;
+      } else {
+        computedArea = Math.round((totalSqFt / 9) * 100) / 100;
+      }
+      const areaStr = String(computedArea);
+      setAreaSize(areaStr);
+
+      if (rateValue.trim()) {
+        const totalRupees = calculateTotalDemandFromRate(rateValue, rateUnit, areaStr, currentUnit);
+        if (totalRupees && totalRupees > 0) {
+          const { val: pVal, unit: pUnit } = priceToDisplayVal(totalRupees);
+          setPriceValue(pVal);
+          setPriceUnit(pUnit);
+        }
+      }
+    }
+  };
+
+  // When user changes rate value
+  const handleRateChange = (newRate: string) => {
+    setRateValue(newRate);
+    if (newRate.trim() && areaSize.trim()) {
+      const totalRupees = calculateTotalDemandFromRate(newRate, rateUnit, areaSize, areaUnit);
+      if (totalRupees && totalRupees > 0) {
+        const { val: pVal, unit: pUnit } = priceToDisplayVal(totalRupees);
+        setPriceValue(pVal);
+        setPriceUnit(pUnit);
+      }
+    }
+  };
+
+  // When user changes rate unit radio
+  const handleRateUnitRadioChange = (newUnit: 'per_gaj' | 'per_sqft' | 'per_acre') => {
+    setRateUnit(newUnit);
+    if (rateValue.trim() && areaSize.trim()) {
+      const totalRupees = calculateTotalDemandFromRate(rateValue, newUnit, areaSize, areaUnit);
+      if (totalRupees && totalRupees > 0) {
+        const { val: pVal, unit: pUnit } = priceToDisplayVal(totalRupees);
+        setPriceValue(pVal);
+        setPriceUnit(pUnit);
+      }
+    }
+  };
+
+  // When user manually updates area size
+  const handleAreaSizeManualChange = (newArea: string) => {
+    setAreaSize(newArea);
+    if (rateValue.trim() && newArea.trim()) {
+      const totalRupees = calculateTotalDemandFromRate(rateValue, rateUnit, newArea, areaUnit);
+      if (totalRupees && totalRupees > 0) {
+        const { val: pVal, unit: pUnit } = priceToDisplayVal(totalRupees);
+        setPriceValue(pVal);
+        setPriceUnit(pUnit);
+      }
+    }
+  };
+
+  // When user changes area unit dropdown
+  const handleAreaUnitChange = (newUnit: AreaUnit) => {
+    setAreaUnit(newUnit);
+    if (lengthFt && breadthFt) {
+      handleDimensionsUpdate(lengthFt, breadthFt, newUnit);
+    } else if (rateValue.trim() && areaSize.trim()) {
+      const totalRupees = calculateTotalDemandFromRate(rateValue, rateUnit, areaSize, newUnit);
+      if (totalRupees && totalRupees > 0) {
+        const { val: pVal, unit: pUnit } = priceToDisplayVal(totalRupees);
+        setPriceValue(pVal);
+        setPriceUnit(pUnit);
+      }
+    }
+  };
 
   // Phone duplicate warning state
   const [duplicateMatches, setDuplicateMatches] = useState<DuplicatePhoneMatch[]>([]);
@@ -208,9 +351,7 @@ export const AddProperty: React.FC = () => {
 
   // Reset form
   const resetForm = () => {
-    setSectorMode('select');
-    setSelectedSectorId('');
-    setNewSectorName('');
+    setSectorInput('');
     setLocation('');
     setHouseNo('');
     setPriceValue('');
@@ -222,6 +363,10 @@ export const AddProperty: React.FC = () => {
     setOwnerPhone('');
     setDetails('');
     setStatus('available');
+    setLengthFt('');
+    setBreadthFt('');
+    setRateValue('');
+    setRateUnit('per_gaj');
     setDuplicateMatches([]);
     setErrors({});
     setEditingPropertyId(null);
@@ -231,10 +376,8 @@ export const AddProperty: React.FC = () => {
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
 
-    if (sectorMode === 'select' && !selectedSectorId) {
-      newErrors.sector = 'Please select a sector or choose to create a new one';
-    } else if (sectorMode === 'new' && !newSectorName.trim()) {
-      newErrors.sector = 'Sector name cannot be blank';
+    if (!sectorInput.trim()) {
+      newErrors.sector = 'Sector / Colony is required';
     }
 
     if (!location.trim()) {
@@ -266,44 +409,58 @@ export const AddProperty: React.FC = () => {
 
     setIsSubmitting(true);
     try {
-      let finalSectorId = selectedSectorId;
+      let finalSectorId = '';
+      const cleanSectorName = sectorInput.trim();
 
-      // Handle new sector creation
-      if (sectorMode === 'new') {
-        const cleanName = newSectorName.trim();
-        // Check local sector de-duplication
-        const existing = sectors.find((s) => s.name.trim().toLowerCase() === cleanName.toLowerCase());
-        if (existing) {
-          finalSectorId = existing.id;
+      // Check if sector already exists (case-insensitive)
+      const existing = sectors.find((s) => s.name.trim().toLowerCase() === cleanSectorName.toLowerCase());
+      if (existing) {
+        finalSectorId = existing.id;
+      } else {
+        // Fast auto-create new sector without prompting or mode switching
+        if (!isSupabaseConfigured) {
+          const newSec: Sector = {
+            id: 'sec-' + Date.now(),
+            name: cleanSectorName,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            is_deleted: false,
+          };
+          setSectors((prev) => [...prev, newSec]);
+          finalSectorId = newSec.id;
         } else {
-          if (!isSupabaseConfigured) {
-            const newSec: Sector = {
-              id: 'sec-' + Date.now(),
-              name: cleanName,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-              is_deleted: false,
-            };
-            setSectors((prev) => [...prev, newSec]);
-            finalSectorId = newSec.id;
-          } else {
-            const { data: newSecData, error: secError } = await supabase
-              .from('sectors')
-              .insert({ name: cleanName })
-              .select('id, name')
-              .single();
+          const { data: newSecData, error: secError } = await supabase
+            .from('sectors')
+            .insert({ name: cleanSectorName })
+            .select('id, name')
+            .single();
 
-            if (secError) {
-              throw new Error(`Failed to create sector: ${secError.message}`);
-            }
-            finalSectorId = newSecData.id;
-            await loadData();
+          if (secError) {
+            throw new Error(`Failed to create sector: ${secError.message}`);
           }
+          finalSectorId = newSecData.id;
+          await loadData();
         }
       }
 
       const parsedPrice = parsePriceInput(priceValue, priceUnit)!;
       const cleanPhone = normalizePhone(ownerPhone).raw;
+
+      // Build metadata prefix for dimensions and rate if entered
+      const metaParts: string[] = [];
+      if (lengthFt.trim() && breadthFt.trim()) {
+        metaParts.push(`Dim: ${lengthFt.trim()}x${breadthFt.trim()} ft`);
+      }
+      if (rateValue.trim()) {
+        const rateLabel = rateUnit === 'per_gaj' ? 'gaj' : rateUnit === 'per_sqft' ? 'sqft' : 'acre';
+        metaParts.push(`Rate: ₹${Number(rateValue.trim()).toLocaleString('en-IN')}/${rateLabel}`);
+      }
+      const metaPrefix = metaParts.length > 0 ? `[${metaParts.join(' | ')}]` : '';
+      const finalDetails = metaPrefix
+        ? details.trim()
+          ? `${metaPrefix} ${details.trim()}`
+          : metaPrefix
+        : details.trim() || null;
 
       if (!isSupabaseConfigured) {
         // Mock save
@@ -322,7 +479,7 @@ export const AddProperty: React.FC = () => {
                   type_name: propertyTypes.find((t) => t.id === selectedTypeId)?.name,
                   area_size: areaSize ? Number(areaSize) : null,
                   area_unit: areaUnit,
-                  details: details.trim() || null,
+                  details: finalDetails,
                   status,
                   _mockContactName: ownerName.trim() || null,
                   _mockPhone: cleanPhone,
@@ -347,7 +504,7 @@ export const AddProperty: React.FC = () => {
             type_name: propertyTypes.find((t) => t.id === selectedTypeId)?.name,
             area_size: areaSize ? Number(areaSize) : null,
             area_unit: areaUnit,
-            details: details.trim() || null,
+            details: finalDetails,
             status,
             created_at: new Date().toISOString(),
             _mockContactName: ownerName.trim() || null,
@@ -378,7 +535,7 @@ export const AddProperty: React.FC = () => {
           p_type_id: selectedTypeId,
           p_area_size: areaSize ? Number(areaSize) : null,
           p_area_unit: areaUnit || null,
-          p_details: details.trim() || null,
+          p_details: finalDetails,
           p_status: status,
           p_contact_name: ownerName.trim() || null,
           p_phone: cleanPhone,
@@ -400,7 +557,7 @@ export const AddProperty: React.FC = () => {
           p_type_id: selectedTypeId,
           p_area_size: areaSize ? Number(areaSize) : null,
           p_area_unit: areaUnit || null,
-          p_details: details.trim() || null,
+          p_details: finalDetails,
           p_status: status,
           p_contact_name: ownerName.trim() || null,
           p_phone: cleanPhone,
@@ -438,8 +595,7 @@ export const AddProperty: React.FC = () => {
         const mockRecent = JSON.parse(localStorage.getItem('re_mock_properties') || '[]');
         const p = mockRecent.find((x: any) => x.id === propId);
         if (p) {
-          setSelectedSectorId(p.sector_id);
-          setSectorMode('select');
+          setSectorInput(p.sector_name || sectors.find((s) => s.id === p.sector_id)?.name || '');
           setLocation(p.location);
           setHouseNo(p.house_no || '');
           // price - use integer arithmetic to avoid float noise
@@ -451,8 +607,29 @@ export const AddProperty: React.FC = () => {
           setAreaUnit(p.area_unit || 'sq yard');
           setOwnerName(p._mockContactName || '');
           setOwnerPhone(p._mockPhone || '');
-          setDetails(p.details || '');
           setStatus(p.status);
+
+          // Parse dimensions and rate if present in details
+          let cleanDetails = p.details || '';
+          const metaMatch = cleanDetails.match(/^\[(.*?)\]\s*(.*)$/s);
+          if (metaMatch) {
+            const metaContent = metaMatch[1];
+            cleanDetails = metaMatch[2] || '';
+            const dimMatch = metaContent.match(/Dim:\s*(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)\s*ft/i);
+            if (dimMatch) {
+              setLengthFt(dimMatch[1]);
+              setBreadthFt(dimMatch[2]);
+            }
+            const rateMatch = metaContent.match(/Rate:\s*₹?([\d,]+)\/(\w+)/i);
+            if (rateMatch) {
+              setRateValue(rateMatch[1].replace(/,/g, ''));
+              const rUnit = rateMatch[2].toLowerCase();
+              if (rUnit.includes('sq') || rUnit.includes('ft')) setRateUnit('per_sqft');
+              else if (rUnit.includes('acre')) setRateUnit('per_acre');
+              else setRateUnit('per_gaj');
+            }
+          }
+          setDetails(cleanDetails);
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }
         return;
@@ -462,8 +639,7 @@ export const AddProperty: React.FC = () => {
       if (error) throw error;
       if (data && data.length > 0) {
         const item = data[0];
-        setSelectedSectorId(item.sector_id);
-        setSectorMode('select');
+        setSectorInput(item.sector_name || sectors.find((s) => s.id === item.sector_id)?.name || '');
         setLocation(item.location);
         setHouseNo(item.house_no || '');
         const { val: pVal, unit: pUnit } = priceToDisplayVal(item.price);
@@ -474,8 +650,29 @@ export const AddProperty: React.FC = () => {
         setAreaUnit((item.area_unit as AreaUnit) || 'sq yard');
         setOwnerName(item.contact_name || '');
         setOwnerPhone(item.phone || '');
-        setDetails(item.details || '');
         setStatus(item.status as PropertyStatus);
+
+        // Parse dimensions and rate if present in details
+        let cleanDetails = item.details || '';
+        const metaMatch = cleanDetails.match(/^\[(.*?)\]\s*(.*)$/s);
+        if (metaMatch) {
+          const metaContent = metaMatch[1];
+          cleanDetails = metaMatch[2] || '';
+          const dimMatch = metaContent.match(/Dim:\s*(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)\s*ft/i);
+          if (dimMatch) {
+            setLengthFt(dimMatch[1]);
+            setBreadthFt(dimMatch[2]);
+          }
+          const rateMatch = metaContent.match(/Rate:\s*₹?([\d,]+)\/(\w+)/i);
+          if (rateMatch) {
+            setRateValue(rateMatch[1].replace(/,/g, ''));
+            const rUnit = rateMatch[2].toLowerCase();
+            if (rUnit.includes('sq') || rUnit.includes('ft')) setRateUnit('per_sqft');
+            else if (rUnit.includes('acre')) setRateUnit('per_acre');
+            else setRateUnit('per_gaj');
+          }
+        }
+        setDetails(cleanDetails);
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     } catch (err: any) {
@@ -540,149 +737,305 @@ export const AddProperty: React.FC = () => {
         )}
       </div>
 
-      {/* Main Form Card */}
-      <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-200 dark:border-slate-800 shadow-xl">
-        <form onSubmit={handleSave} className="space-y-6">
-          {/* Plot ID Notice (Read-only guarantee) */}
-          <div className="p-4 rounded-2xl bg-brand-50/60 dark:bg-brand-950/40 border border-brand-200 dark:border-brand-800 flex items-center justify-between">
-            <div>
-              <span className="text-xs font-semibold uppercase tracking-wider text-brand-700 dark:text-brand-300">
-                Plot Identifier
-              </span>
-              <p className="text-sm text-slate-700 dark:text-slate-300 mt-0.5">
-                {editingPropertyId
-                  ? 'Editing existing Plot ID'
-                  : 'Auto-generated sequentially upon save (e.g. P-0001, P-0042)'}
-              </p>
+      {/* Main Form Card - Compact Layout */}
+      <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-7 border border-slate-200 dark:border-slate-800 shadow-xl">
+        <form onSubmit={handleSave} className="space-y-4">
+          {/* Line 1: Property Type (Full-Width 1-Click Radio Buttons) */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Property Type <span className="text-rose-500">*</span>
+              </label>
+              <span className="text-[11px] text-slate-400">1-click select</span>
             </div>
-            <span className="px-3 py-1.5 rounded-lg text-xs font-bold font-mono bg-white dark:bg-slate-900 text-brand-700 dark:text-brand-300 border border-brand-300 dark:border-brand-700">
-              {editingPropertyId ? 'FIXED' : 'AUTO-GEN'}
-            </span>
+            <div className="flex flex-wrap gap-2">
+              {propertyTypes.map((type) => {
+                const isSelected = selectedTypeId === type.id;
+                return (
+                  <label
+                    key={type.id}
+                    className={`flex-1 min-w-[130px] sm:min-w-[140px] flex items-center justify-center gap-2 py-2 px-3 rounded-xl border text-xs sm:text-sm font-medium cursor-pointer transition-all select-none text-center ${
+                      isSelected
+                        ? 'border-brand-600 bg-brand-50/90 text-brand-700 dark:bg-brand-950/70 dark:border-brand-500 dark:text-brand-200 shadow-sm font-semibold ring-1 ring-brand-500/20'
+                        : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 bg-slate-50/60 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="propertyTypeRadio"
+                      value={type.id}
+                      checked={isSelected}
+                      onChange={() => setSelectedTypeId(type.id)}
+                      className="w-3.5 h-3.5 text-brand-600 focus:ring-brand-500 border-slate-300 dark:border-slate-600 cursor-pointer shrink-0"
+                    />
+                    <span className="truncate">{type.name}</span>
+                  </label>
+                );
+              })}
+            </div>
+            {errors.type && <p className="text-xs text-rose-500 mt-1">{errors.type}</p>}
           </div>
 
-          {/* Section: Location & Sector */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            {/* Sector Selector */}
-            <div className="sm:col-span-2">
-              <div className="flex items-center justify-between mb-2">
+          {/* Line 2: Dimensions (Left) & Total Area & Unit (Right) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Left: Dimensions (Length × Breadth) */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <Compass className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
+                  <span>Dimensions (Length × Breadth)</span>
+                </label>
+                {lengthFt && breadthFt ? (
+                  <span className="text-[11px] font-semibold text-brand-600 dark:text-brand-400 font-mono">
+                    {lengthFt}×{breadthFt} ft ({Number(lengthFt) * Number(breadthFt)} sq ft)
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-slate-400">Optional</span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="Length (ft)"
+                  title="Length in feet"
+                  value={lengthFt}
+                  onChange={(e) => {
+                    setLengthFt(e.target.value);
+                    handleDimensionsUpdate(e.target.value, breadthFt, areaUnit);
+                  }}
+                  className="w-full py-2.5 px-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
+                />
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="Breadth (ft)"
+                  title="Breadth in feet"
+                  value={breadthFt}
+                  onChange={(e) => {
+                    setBreadthFt(e.target.value);
+                    handleDimensionsUpdate(lengthFt, e.target.value, areaUnit);
+                  }}
+                  className="w-full py-2.5 px-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
+                />
+              </div>
+            </div>
+
+            {/* Right: Total Area & Unit */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                  Total Area & Unit
+                </label>
+                <span className="text-[11px] text-slate-400">Auto or direct entry</span>
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="Total Area"
+                  title="Total Area Size"
+                  value={areaSize}
+                  onChange={(e) => handleAreaSizeManualChange(e.target.value)}
+                  className="flex-1 py-2.5 px-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs sm:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
+                />
+                <select
+                  value={areaUnit}
+                  onChange={(e) => handleAreaUnitChange(e.target.value as AreaUnit)}
+                  className="w-36 sm:w-44 py-2.5 px-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
+                >
+                  <option value="sq yard">Gaj (Sq. Yd)</option>
+                  <option value="sq ft">Sq. Ft</option>
+                  <option value="acre">Acre</option>
+                  <option value="marla">Marla</option>
+                  <option value="kanal">Kanal</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Line 3: Sector / Colony (Left) & Location / Address (Right) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Left: Sector / Colony (Fast Direct Input with Datalist Suggestions) */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
                   Sector / Colony <span className="text-rose-500">*</span>
                 </label>
-                <button
-                  type="button"
-                  onClick={() => setSectorMode(sectorMode === 'select' ? 'new' : 'select')}
-                  className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline flex items-center gap-1"
-                >
-                  {sectorMode === 'select' ? (
-                    <>
-                      <Plus className="w-3 h-3" />
-                      <span>Create New Sector</span>
-                    </>
-                  ) : (
-                    <span>Select Existing Sector</span>
-                  )}
-                </button>
+                <span className="text-[11px] text-slate-400">Type or pick from list</span>
               </div>
 
-              {sectorMode === 'select' ? (
-                <select
-                  value={selectedSectorId}
-                  onChange={(e) => setSelectedSectorId(e.target.value)}
-                  className={`w-full py-2.5 px-3.5 bg-slate-50 dark:bg-slate-800 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white ${
-                    errors.sector ? 'border-rose-500' : 'border-slate-200 dark:border-slate-700'
-                  }`}
-                >
-                  <option value="">-- Choose a Sector --</option>
-                  {sectors.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              ) : (
+              <div className="relative">
                 <input
                   type="text"
-                  placeholder="Enter new sector name (e.g. Sector 57 or Sushant Lok)"
-                  value={newSectorName}
-                  onChange={(e) => setNewSectorName(e.target.value)}
-                  className={`w-full py-2.5 px-3.5 bg-slate-50 dark:bg-slate-800 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white ${
+                  placeholder="e.g. Sector 7, Sector 14, or Mohan Nagar"
+                  value={sectorInput}
+                  onFocus={() => setIsSectorDropdownOpen(true)}
+                  onBlur={() => {
+                    setTimeout(() => setIsSectorDropdownOpen(false), 200);
+                  }}
+                  onChange={(e) => {
+                    setSectorInput(e.target.value);
+                    setIsSectorDropdownOpen(true);
+                  }}
+                  className={`w-full py-2.5 px-3 pr-9 bg-slate-50 dark:bg-slate-800 border rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white font-medium ${
                     errors.sector ? 'border-rose-500' : 'border-slate-200 dark:border-slate-700'
                   }`}
                 />
-              )}
+                {sectorInput && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSectorInput('');
+                      setIsSectorDropdownOpen(false);
+                    }}
+                    className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                    title="Clear sector"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+
+                {/* Instant Suggestion Dropdown as user types "sec", "moh", etc. */}
+                {isSectorDropdownOpen && filteredSectors.length > 0 && (
+                  <div className="absolute z-30 left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden py-1 max-h-60 overflow-y-auto">
+                    <div className="px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-800/80">
+                      {sectorInput.trim() ? `Matching Sectors (${filteredSectors.length})` : 'All Available Sectors'}
+                    </div>
+                    {filteredSectors.map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setSectorInput(s.name);
+                          setIsSectorDropdownOpen(false);
+                        }}
+                        className="w-full px-3.5 py-2 text-left text-xs sm:text-sm hover:bg-brand-50 dark:hover:bg-slate-800/80 flex items-center justify-between transition-colors group cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-6 h-6 rounded-lg bg-slate-100 dark:bg-slate-800 group-hover:bg-brand-100 dark:group-hover:bg-brand-950 flex items-center justify-center text-slate-500 group-hover:text-brand-600 transition-colors">
+                            <MapPin className="w-3.5 h-3.5" />
+                          </div>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200 group-hover:text-brand-600 dark:group-hover:text-brand-400">
+                            {s.name}
+                          </span>
+                        </div>
+                        <span className="text-[10px] uppercase font-bold text-slate-400 group-hover:text-brand-500 tracking-wider">
+                          Select
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               {errors.sector && <p className="text-xs text-rose-500 mt-1">{errors.sector}</p>}
             </div>
 
-            {/* Location / Address */}
-            <div className="sm:col-span-2">
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-                Location / Address <span className="text-rose-500">*</span>
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="e.g. Near Community Center, 60ft Road"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                className={`w-full py-2.5 px-3.5 bg-slate-50 dark:bg-slate-800 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white ${
-                  errors.location ? 'border-rose-500' : 'border-slate-200 dark:border-slate-700'
-                }`}
-              />
+            {/* Right: Location / Address */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                  Location / Address <span className="text-rose-500">*</span>
+                </label>
+                <span className="text-[11px] text-slate-400">Street / landmark</span>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Near Community Center, 60ft Road"
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  className={`flex-1 py-2.5 px-3 bg-slate-50 dark:bg-slate-800 border rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white ${
+                    errors.location ? 'border-rose-500' : 'border-slate-200 dark:border-slate-700'
+                  }`}
+                />
+                <input
+                  type="text"
+                  placeholder="House/Plot No (Opt)"
+                  title="Owner's Private House/Plot No"
+                  value={houseNo}
+                  onChange={(e) => setHouseNo(e.target.value)}
+                  className="w-36 py-2.5 px-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
+                />
+              </div>
               {errors.location && <p className="text-xs text-rose-500 mt-1">{errors.location}</p>}
             </div>
+          </div>
 
-            {/* Plot/House No. */}
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-                Owner's Plot / House No. <span className="text-slate-400 font-normal">(Optional)</span>
+          {/* Line 4: Price Rate per Unit with Dropdown Selection (Like Upper Form) */}
+          <div className="p-3.5 rounded-2xl bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/80 space-y-1.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+              <label className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Rate / Price Per Unit <span className="text-slate-400 font-normal">(Optional for Plots / Land)</span>
               </label>
-              <input
-                type="text"
-                placeholder="e.g. 142-B or Plot 23"
-                value={houseNo}
-                onChange={(e) => setHouseNo(e.target.value)}
-                className="w-full py-2.5 px-3.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
-              />
-              <p className="text-[11px] text-slate-400 mt-1">Owner's private numbering. Not the system Plot ID.</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Leave blank for building, flat, or lump-sum property.
+              </p>
             </div>
 
-            {/* Status */}
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-                Listing Status
-              </label>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <span className="absolute left-3 top-2.5 text-xs font-bold text-slate-400">₹</span>
+                <input
+                  type="number"
+                  step="any"
+                  placeholder="e.g. 50000 or 3500 (leave blank for building)"
+                  value={rateValue}
+                  onChange={(e) => handleRateChange(e.target.value)}
+                  className="w-full py-2.5 px-3 pl-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white font-medium"
+                />
+              </div>
+
+              {/* Dropdown Selection for Rate Unit */}
               <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value as PropertyStatus)}
-                className="w-full py-2.5 px-3.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
+                value={rateUnit}
+                onChange={(e) => handleRateUnitRadioChange(e.target.value as 'per_gaj' | 'per_sqft' | 'per_acre')}
+                className="w-40 sm:w-48 py-2.5 px-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
               >
-                <option value="available">Available</option>
-                <option value="hold">On Hold</option>
-                <option value="sold">Sold</option>
+                <option value="per_gaj">Per Gaj (Sq. Yard)</option>
+                <option value="per_sqft">Per Sq. Ft</option>
+                <option value="per_acre">Per Acre</option>
               </select>
             </div>
           </div>
 
-          {/* Section: Price Input with Live Preview */}
-          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-              Price <span className="text-rose-500">*</span>
-            </label>
+          {/* Line 5: Total Demand Field */}
+          <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-sm space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                <Calculator className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
+                <span>Total Demand (Price) <span className="text-rose-500">*</span></span>
+              </label>
+              {rateValue && areaSize ? (
+                <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                  ✓ Auto-multiplied ({areaSize} {areaUnit} × ₹{Number(rateValue).toLocaleString('en-IN')})
+                </span>
+              ) : (
+                <span className="text-[11px] text-slate-400">
+                  Direct lump-sum demand (Building / House / Flat)
+                </span>
+              )}
+            </div>
+
             <div className="flex gap-2">
               <input
                 type="text"
                 required
-                placeholder="e.g. 1.25 or 85"
+                placeholder="e.g. 4 or 85 or 1.25"
                 value={priceValue}
                 onChange={(e) => setPriceValue(e.target.value)}
-                className={`flex-1 py-2.5 px-3.5 bg-white dark:bg-slate-900 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white font-medium ${
+                className={`flex-1 py-2.5 px-3.5 bg-slate-50 dark:bg-slate-800 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white font-bold ${
                   errors.price ? 'border-rose-500' : 'border-slate-200 dark:border-slate-700'
                 }`}
               />
               <select
                 value={priceUnit}
                 onChange={(e) => setPriceUnit(e.target.value as PriceUnit)}
-                className="w-28 py-2.5 px-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
+                className="w-28 py-2.5 px-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
               >
                 <option value="Cr">Crore (Cr)</option>
                 <option value="Lakh">Lakh</option>
@@ -691,7 +1044,7 @@ export const AddProperty: React.FC = () => {
 
             {/* Live Indian Notation Preview */}
             {priceValue && (
-              <div className="mt-2 text-xs font-medium text-brand-600 dark:text-brand-400 flex items-center gap-1.5">
+              <div className="text-xs font-medium text-brand-600 dark:text-brand-400 flex items-center gap-1.5 pt-0.5">
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>{getPricePreview(priceValue, priceUnit) || 'Invalid price entered'}</span>
               </div>
@@ -699,95 +1052,21 @@ export const AddProperty: React.FC = () => {
             {errors.price && <p className="text-xs text-rose-500 mt-1">{errors.price}</p>}
           </div>
 
-          {/* Section: Property Type (Large Single-Select Tick Chips) */}
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2">
-              Property Type <span className="text-rose-500">*</span>
-            </label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-              {propertyTypes.map((type) => {
-                const isSelected = selectedTypeId === type.id;
-                return (
-                  <button
-                    key={type.id}
-                    type="button"
-                    onClick={() => setSelectedTypeId(type.id)}
-                    className={`py-3 px-3.5 rounded-xl border text-sm font-medium flex items-center justify-between transition-all min-h-[48px] ${
-                      isSelected
-                        ? 'border-brand-600 bg-brand-50/80 text-brand-700 dark:bg-brand-950/60 dark:border-brand-500 dark:text-brand-200 shadow-sm'
-                        : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 text-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    <span className="truncate">{type.name}</span>
-                    {isSelected && <Check className="w-4 h-4 text-brand-600 dark:text-brand-400 shrink-0 ml-1" />}
-                  </button>
-                );
-              })}
-            </div>
-            {errors.type && <p className="text-xs text-rose-500 mt-1">{errors.type}</p>}
-          </div>
-
-          {/* Section: Area Measurement */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-                Area Size <span className="text-slate-400 font-normal">(Optional)</span>
-              </label>
-              <input
-                type="number"
-                step="any"
-                placeholder="e.g. 250"
-                value={areaSize}
-                onChange={(e) => setAreaSize(e.target.value)}
-                className="w-full py-2.5 px-3.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-                Area Unit
-              </label>
-              <select
-                value={areaUnit}
-                onChange={(e) => setAreaUnit(e.target.value as AreaUnit)}
-                className="w-full py-2.5 px-3.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
-              >
-                <option value="sq yard">Sq. Yard (Gaj)</option>
-                <option value="gaj">Gaj</option>
-                <option value="marla">Marla</option>
-                <option value="kanal">Kanal</option>
-                <option value="acre">Acre</option>
-                <option value="sq ft">Sq. Ft</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Section: Owner Contact Info (Isolated in DB) */}
-          <div className="p-4 rounded-2xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 space-y-4">
+          {/* Line 6: Owner Phone (Left) & Owner Name (Right) */}
+          <div className="p-3.5 rounded-2xl bg-amber-50/40 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-900/40 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-300">
                 Owner Contact Details (Confidential)
               </span>
               <span className="text-[11px] text-amber-700 dark:text-amber-400">
-                Protected by Database RLS
+                Protected
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* Left: Phone No Field */}
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-                  Owner / Seller Name <span className="text-slate-400 font-normal">(Optional)</span>
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Ramesh Kumar"
-                  value={ownerName}
-                  onChange={(e) => setOwnerName(e.target.value)}
-                  className="w-full py-2.5 px-3.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
                   Owner Mobile Number <span className="text-rose-500">*</span>
                 </label>
                 <input
@@ -796,7 +1075,7 @@ export const AddProperty: React.FC = () => {
                   placeholder="10-digit mobile (e.g. 9876543210)"
                   value={ownerPhone}
                   onChange={(e) => setOwnerPhone(e.target.value)}
-                  className={`w-full py-2.5 px-3.5 bg-white dark:bg-slate-900 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white ${
+                  className={`w-full py-2.5 px-3 bg-white dark:bg-slate-900 border rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white font-mono ${
                     errors.phone ? 'border-rose-500' : 'border-slate-200 dark:border-slate-700'
                   }`}
                 />
@@ -805,64 +1084,76 @@ export const AddProperty: React.FC = () => {
                   <p className="text-[11px] text-slate-400 mt-1">Checking existing inventory...</p>
                 )}
               </div>
+
+              {/* Right: Optional Name Field */}
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
+                  Owner / Seller Name <span className="text-slate-400 font-normal">(Optional)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Ramesh Kumar"
+                  value={ownerName}
+                  onChange={(e) => setOwnerName(e.target.value)}
+                  className="w-full py-2.5 px-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
+                />
+              </div>
             </div>
 
-            {/* Duplicate Phone Warning Box (Warning ONLY, never blocks) */}
+            {/* Duplicate Phone Warning Box */}
             {duplicateMatches.length > 0 && (
-              <div className="p-3.5 rounded-xl bg-amber-100/80 dark:bg-amber-900/40 border border-amber-300 dark:border-amber-700/60 text-amber-900 dark:text-amber-100 flex items-start gap-2.5 text-xs">
+              <div className="p-3 rounded-xl bg-amber-100/90 dark:bg-amber-900/50 border border-amber-300 dark:border-amber-700/60 text-amber-900 dark:text-amber-100 flex items-start gap-2 text-xs">
                 <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                 <div className="flex-1">
-                  <span className="font-bold">Duplicate Phone Warning:</span> This contact number is already linked to existing listing(s):
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  <span className="font-bold">Duplicate Phone:</span> Linked to existing listing(s):
+                  <div className="mt-1 flex flex-wrap gap-1">
                     {duplicateMatches.map((m, idx) => (
-                      <span key={idx} className="font-mono font-semibold px-2 py-0.5 rounded bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-700">
+                      <span key={idx} className="font-mono font-semibold px-2 py-0.5 rounded bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-700 text-[11px]">
                         {m.plot_id} ({m.location})
                       </span>
                     ))}
                   </div>
-                  <p className="mt-1 text-[11px] opacity-80">You can still save if this owner has multiple properties.</p>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Details / Notes */}
+          {/* Line 7: General Details / Notes Textarea */}
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
               General Details / Notes <span className="text-slate-400 font-normal">(Optional)</span>
             </label>
             <textarea
-              rows={3}
+              rows={2}
               placeholder="e.g. East facing, 24m road, registry done, boundary wall constructed..."
               value={details}
               onChange={(e) => setDetails(e.target.value)}
-              className="w-full py-2.5 px-3.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
+              className="w-full py-2 px-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
             />
           </div>
 
-          {/* Submit & Reset Buttons */}
-          <div className="flex flex-col sm:flex-row gap-3 pt-2">
+          {/* Action Buttons */}
+          <div className="pt-2 flex items-center justify-end gap-2.5">
+            <button
+              type="button"
+              onClick={resetForm}
+              className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold transition-colors min-h-[44px]"
+            >
+              Reset Form
+            </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="flex-1 py-3 px-6 rounded-xl font-semibold text-white bg-brand-600 hover:bg-brand-700 active:bg-brand-800 shadow-md shadow-brand-500/25 disabled:opacity-50 flex items-center justify-center gap-2 transition-all min-h-[44px]"
+              className="px-6 py-2.5 rounded-xl font-semibold text-white bg-brand-600 hover:bg-brand-700 active:bg-brand-800 shadow-md shadow-brand-500/25 disabled:opacity-50 flex items-center justify-center gap-2 transition-all min-h-[44px] text-xs sm:text-sm"
             >
               {isSubmitting ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Saving Property...</span>
+                  <span>Saving...</span>
                 </>
               ) : (
                 <span>{editingPropertyId ? 'Update Property' : 'Save Property'}</span>
               )}
-            </button>
-            <button
-              type="button"
-              onClick={resetForm}
-              disabled={isSubmitting}
-              className="py-3 px-6 rounded-xl font-medium border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 min-h-[44px]"
-            >
-              Reset Form
             </button>
           </div>
         </form>
