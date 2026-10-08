@@ -22,6 +22,7 @@ import {
   ChevronUp,
   X,
   MapPin,
+  Loader2,
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useToast } from '../context/ToastContext';
@@ -424,9 +425,9 @@ export const SearchProperties: React.FC = () => {
     const lines = [
       `Plot ID: ${p.plot_id}`,
       `Type: ${p.type_name || 'Property'}`,
-      `Sector: ${p.sector_name || 'N/A'}`,
-      `Location: ${p.location}${p.house_no ? ` (${p.house_no})` : ''}`,
-      `Price: ${formatPrice(p.price)}`,
+      ...(p.location || p.house_no
+        ? [`Location: ${[p.location, p.house_no ? `(${p.house_no})` : ''].filter(Boolean).join(' ')}`]
+        : []),
       p.area_size ? `Area: ${p.area_size} ${p.area_unit || ''}` : null,
       `Status: ${p.status ? p.status.toUpperCase() : 'AVAILABLE'}`,
       p.details ? `Details: ${p.details}` : null,
@@ -566,10 +567,16 @@ export const SearchProperties: React.FC = () => {
 
         <button
           type="button"
-          onClick={handleFetchAll}
-          className="px-3.5 py-2.5 rounded-xl text-xs font-semibold bg-brand-50 text-brand-700 dark:bg-brand-950/60 dark:text-brand-300 hover:bg-brand-100 dark:hover:bg-brand-900/40 min-h-[44px] whitespace-nowrap"
+          onClick={() => executeSearch()}
+          disabled={isLoading}
+          className="px-3.5 py-2.5 rounded-xl text-xs font-bold bg-brand-600 text-white hover:bg-brand-700 min-h-[44px] flex items-center gap-1.5 whitespace-nowrap shadow-sm disabled:opacity-50"
         >
-          Fetch All
+          {isLoading ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <Search className="w-3.5 h-3.5 stroke-[2.5]" />
+          )}
+          <span>Search</span>
         </button>
       </div>
 
@@ -810,18 +817,34 @@ export const SearchProperties: React.FC = () => {
 
         {/* Bottom Toolbar: Fetch All, Reset, Show Phone Security Toggle, Export */}
         <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => executeSearch()}
+              disabled={isLoading}
+              className="py-2 px-4 rounded-xl text-xs font-bold bg-brand-600 hover:bg-brand-700 text-white flex items-center gap-2 min-h-[44px] shadow-sm transition-all disabled:opacity-50"
+            >
+              {isLoading ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Search className="w-3.5 h-3.5 stroke-[2.5]" />
+              )}
+              <span>Search Properties</span>
+            </button>
+
             <button
               type="button"
               onClick={handleFetchAll}
-              className="py-2 px-3 rounded-xl text-xs font-semibold bg-brand-50 text-brand-700 dark:bg-brand-950/60 dark:text-brand-300 hover:bg-brand-100 min-h-[44px]"
+              className="py-2 px-3 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 min-h-[44px] transition-colors"
+              title="Clear all active filters and show all properties"
             >
-              Fetch All Properties
+              View All (No Filters)
             </button>
+
             <button
               type="button"
               onClick={handleReset}
-              className="py-2 px-3 rounded-xl text-xs font-medium border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1 min-h-[44px]"
+              className="py-2 px-3 rounded-xl text-xs font-medium border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1 min-h-[44px] transition-colors"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Reset</span>
@@ -858,10 +881,14 @@ export const SearchProperties: React.FC = () => {
         <div className="pt-2 md:hidden">
           <button
             type="button"
-            onClick={() => setIsMobileFiltersOpen(false)}
-            className="w-full py-2.5 px-4 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs transition-colors min-h-[44px] shadow-sm"
+            onClick={() => {
+              setIsMobileFiltersOpen(false);
+              executeSearch();
+            }}
+            className="w-full py-2.5 px-4 rounded-xl bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs transition-colors min-h-[44px] shadow-sm flex items-center justify-center gap-2"
           >
-            Apply Filters & View Results
+            <Search className="w-4 h-4" />
+            <span>Search & View Results</span>
           </button>
         </div>
       </div>
@@ -1022,9 +1049,11 @@ export const SearchProperties: React.FC = () => {
                     <p className="text-xs text-slate-600 dark:text-slate-400">
                       Sector: <span className="font-medium text-slate-900 dark:text-slate-200">{p.sector_name || 'N/A'}</span>
                     </p>
-                    <p className="text-xs text-slate-600 dark:text-slate-400">
-                      Address: <span className="font-medium">{p.location}</span> {p.house_no && `(${p.house_no})`}
-                    </p>
+                    {(p.location || p.house_no) ? (
+                      <p className="text-xs text-slate-600 dark:text-slate-400">
+                        Address: <span className="font-medium">{p.location || '—'}</span> {p.house_no && `(${p.house_no})`}
+                      </p>
+                    ) : null}
                     {p.area_size && (
                       <p className="text-xs text-slate-500">
                         Area: {p.area_size} {p.area_unit}
@@ -1129,7 +1158,7 @@ export const SearchProperties: React.FC = () => {
                       </td>
                       <td className="py-3 px-4 font-medium">{p.sector_name || 'N/A'}</td>
                       <td className="py-3 px-4">
-                        <div className="font-medium text-slate-900 dark:text-white">{p.location}</div>
+                        <div className="font-medium text-slate-900 dark:text-white">{p.location || '—'}</div>
                         {p.house_no && <div className="text-xs text-slate-400">House: {p.house_no}</div>}
                       </td>
                       <td className="py-3 px-4">{p.type_name || 'Property'}</td>

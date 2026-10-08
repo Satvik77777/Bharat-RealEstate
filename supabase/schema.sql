@@ -449,7 +449,7 @@ BEGIN
   )
   VALUES (
     p_sector_id,
-    trim(p_location),
+    COALESCE(trim(p_location), ''),
     NULLIF(trim(p_house_no), ''),
     p_price,
     p_type_id,
@@ -520,7 +520,7 @@ BEGIN
   UPDATE public.properties
   SET
     sector_id = p_sector_id,
-    location = trim(p_location),
+    location = COALESCE(trim(p_location), ''),
     house_no = NULLIF(trim(p_house_no), ''),
     price = p_price,
     type_id = p_type_id,
@@ -862,7 +862,7 @@ BEGIN
     RAISE EXCEPTION 'Authentication required';
   END IF;
 
-  SELECT * INTO v_buyer FROM public.buyers WHERE id = p_buyer_id AND is_deleted = FALSE;
+  SELECT * INTO v_buyer FROM public.buyers b WHERE b.id = p_buyer_id AND b.is_deleted = FALSE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Buyer not found or deleted';
   END IF;

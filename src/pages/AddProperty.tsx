@@ -380,10 +380,6 @@ export const AddProperty: React.FC = () => {
       newErrors.sector = 'Sector / Colony is required';
     }
 
-    if (!location.trim()) {
-      newErrors.location = 'Location / Address is required';
-    }
-
     const parsedPrice = parsePriceInput(priceValue, priceUnit);
     if (!parsedPrice || parsedPrice <= 0) {
       newErrors.price = 'Enter a valid positive price (max 2 decimals)';
@@ -938,15 +934,14 @@ export const AddProperty: React.FC = () => {
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                  Location / Address <span className="text-rose-500">*</span>
+                  Location / Address <span className="text-slate-400 font-normal lowercase text-[11px]">(optional)</span>
                 </label>
                 <span className="text-[11px] text-slate-400">Street / landmark</span>
               </div>
               <div className="flex gap-2">
                 <input
                   type="text"
-                  required
-                  placeholder="e.g. Near Community Center, 60ft Road"
+                  placeholder="e.g. Near Community Center, 60ft (Optional)"
                   value={location}
                   onChange={(e) => setLocation(e.target.value)}
                   className={`flex-1 py-2.5 px-3 bg-slate-50 dark:bg-slate-800 border rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white ${
@@ -1109,7 +1104,7 @@ export const AddProperty: React.FC = () => {
                   <div className="mt-1 flex flex-wrap gap-1">
                     {duplicateMatches.map((m, idx) => (
                       <span key={idx} className="font-mono font-semibold px-2 py-0.5 rounded bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-700 text-[11px]">
-                        {m.plot_id} ({m.location})
+                        {m.plot_id}{m.location ? ` (${m.location})` : ''}
                       </span>
                     ))}
                   </div>
@@ -1190,11 +1185,13 @@ export const AddProperty: React.FC = () => {
                   <div>
                     <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                       <span>{item.type_name || 'Property'}</span>
-                      <span className="text-xs font-normal text-slate-500">in {item.sector_name || item.location}</span>
+                      <span className="text-xs font-normal text-slate-500">in {item.sector_name || item.location || 'N/A'}</span>
                     </h3>
-                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-                      {item.location} {item.house_no && `(No: ${item.house_no})`}
-                    </p>
+                    {(item.location || item.house_no) && (
+                      <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                        {[item.location, item.house_no ? `(No: ${item.house_no})` : ''].filter(Boolean).join(' ')}
+                      </p>
+                    )}
                     <div className="flex items-center gap-3 mt-1.5 text-xs">
                       <span className="font-semibold text-brand-600 dark:text-brand-400">{formatPrice(item.price)}</span>
                       {item.area_size && (

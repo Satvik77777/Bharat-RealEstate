@@ -179,7 +179,7 @@ BEGIN
     sector_id, location, house_no, price, type_id, area_size, area_unit, details, status
   )
   VALUES (
-    p_sector_id, trim(p_location), NULLIF(trim(p_house_no), ''), p_price, p_type_id,
+    p_sector_id, COALESCE(trim(p_location), ''), NULLIF(trim(p_house_no), ''), p_price, p_type_id,
     p_area_size, NULLIF(trim(p_area_unit), ''), NULLIF(trim(p_details), ''),
     COALESCE(p_status, 'available')
   )
@@ -229,7 +229,7 @@ BEGIN
   UPDATE public.properties
   SET
     sector_id = p_sector_id,
-    location = trim(p_location),
+    location = COALESCE(trim(p_location), ''),
     house_no = NULLIF(trim(p_house_no), ''),
     price = p_price,
     type_id = p_type_id,
@@ -405,7 +405,7 @@ AS $$
 DECLARE
   v_buyer RECORD;
 BEGIN
-  SELECT * INTO v_buyer FROM public.buyers WHERE id = p_buyer_id AND is_deleted = FALSE;
+  SELECT * INTO v_buyer FROM public.buyers b WHERE b.id = p_buyer_id AND b.is_deleted = FALSE;
   IF NOT FOUND THEN
     RETURN;
   END IF;
@@ -434,6 +434,16 @@ BEGIN
     AND p.status = 'available'
     AND (v_buyer.budget_min IS NULL OR p.price >= v_buyer.budget_min)
     AND (v_buyer.budget_max IS NULL OR p.price <= v_buyer.budget_max)
+    AND (
+      v_buyer.sector_ids IS NULL
+      OR cardinality(v_buyer.sector_ids) = 0
+      OR p.sector_id = ANY(v_buyer.sector_ids)
+    )
+    AND (
+      v_buyer.type_ids IS NULL
+      OR cardinality(v_buyer.type_ids) = 0
+      OR p.type_id = ANY(v_buyer.type_ids)
+    )
   ORDER BY p.price ASC, p.created_at DESC;
 END;
 $$;

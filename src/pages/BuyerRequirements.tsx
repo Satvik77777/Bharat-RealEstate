@@ -452,10 +452,61 @@ export const BuyerRequirements: React.FC = () => {
         return;
       }
 
+      let matchedList: Property[] = [];
       const { data, error } = await supabase.rpc('match_properties', { p_buyer_id: buyer.id });
-      if (error) throw error;
+      
+      if (!error && Array.isArray(data)) {
+        matchedList = data;
+      } else {
+        // Resilient fallback: direct query matching engine
+        let query = supabase
+          .from('properties')
+          .select(`
+            id,
+            plot_no,
+            plot_id,
+            sector_id,
+            location,
+            house_no,
+            price,
+            type_id,
+            area_size,
+            area_unit,
+            details,
+            status,
+            created_at,
+            sectors(name),
+            property_types(name)
+          `)
+          .eq('is_deleted', false)
+          .eq('status', 'available');
 
-      setMatchedProperties(data || []);
+        if (buyer.budget_min) {
+          query = query.gte('price', buyer.budget_min);
+        }
+        if (buyer.budget_max) {
+          query = query.lte('price', buyer.budget_max);
+        }
+        if (buyer.sector_ids && buyer.sector_ids.length > 0) {
+          query = query.in('sector_id', buyer.sector_ids);
+        }
+        if (buyer.type_ids && buyer.type_ids.length > 0) {
+          query = query.in('type_id', buyer.type_ids);
+        }
+
+        const { data: fbData, error: fbErr } = await query.order('price', { ascending: true });
+        if (fbErr) throw (error || fbErr);
+
+        matchedList = (fbData || []).map((p: any) => ({
+          ...p,
+          sector_name: p.sectors?.name,
+          type_name: p.property_types?.name,
+          phone: null, // STRICT: Never expose seller phone to buyer
+          contact_name: null,
+        }));
+      }
+
+      setMatchedProperties(matchedList);
     } catch (err: any) {
       showToast({ type: 'error', title: 'Matching Error', message: err.message || 'Could not fetch matches' });
     } finally {
