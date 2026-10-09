@@ -562,7 +562,7 @@ export const SearchProperties: React.FC = () => {
           setSelectedTypes(tid ? [tid] : []);
         }
       } else {
-        if (selectedSubType === 'home' || selectedSubType === 'flat') {
+        if (selectedSubType === 'home' || selectedSubType === 'flat' || selectedSubType === 'farmhouse') {
           setSelectedSubType('plot');
           const tid = getTypeIdForSubType('plot', propertyTypes);
           setSelectedTypes(tid ? [tid] : []);
@@ -958,7 +958,7 @@ export const SearchProperties: React.FC = () => {
                 Select {selectedCategory === 'residential' ? 'Residential' : 'Commercial'} Type:
               </span>
               <span className="text-[11px] text-slate-400">
-                {selectedCategory === 'residential' ? '4 options' : '5 options'}
+                {(selectedCategory === 'residential' ? residentialOptions : commercialOptions).length} options
               </span>
             </div>
 
@@ -970,7 +970,7 @@ export const SearchProperties: React.FC = () => {
                     key={opt.id}
                     type="button"
                     onClick={() => handleSubTypeClick(opt.id)}
-                    className={`flex-1 min-w-[110px] sm:min-w-[130px] flex items-center justify-center gap-2 py-2 px-3 rounded-xl border text-xs sm:text-sm font-medium cursor-pointer transition-all select-none text-center ${
+                    className={`flex-1 min-w-fit flex items-center justify-center gap-2 py-2 px-3.5 rounded-xl border text-xs sm:text-sm font-medium cursor-pointer transition-all select-none text-center ${
                       isSelected
                         ? 'border-brand-600 bg-brand-50/90 text-brand-700 dark:bg-brand-950/70 dark:border-brand-500 dark:text-brand-200 shadow-sm font-semibold ring-1 ring-brand-500/20'
                         : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 bg-slate-50/60 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300'
@@ -987,7 +987,7 @@ export const SearchProperties: React.FC = () => {
                         <span className="w-2 h-2 rounded-full bg-brand-600 dark:bg-brand-400" />
                       )}
                     </span>
-                    <span className="truncate">{opt.label}</span>
+                    <span className="whitespace-nowrap">{opt.label}</span>
                   </button>
                 );
               })}

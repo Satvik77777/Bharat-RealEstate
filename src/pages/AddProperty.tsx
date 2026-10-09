@@ -19,20 +19,21 @@ import { formatPropertyId } from '../lib/propertyFormat';
 import type { Sector, PropertyType, PropertyStatus, AreaUnit, DuplicatePhoneMatch } from '../types/database';
 
 export type PropertyCategory = 'residential' | 'commercial';
-export type PropertySubType = 'plot' | 'home' | 'flat' | 'shop' | 'agriculture' | 'industry' | 'other';
+export type PropertySubType = 'plot' | 'home' | 'flat' | 'farmhouse' | 'shop' | 'agriculture' | 'industry' | 'other';
 
 export const residentialOptions: { id: PropertySubType; label: string }[] = [
   { id: 'plot', label: 'Plot' },
-  { id: 'home', label: 'Home' },
-  { id: 'flat', label: 'Flat' },
+  { id: 'home', label: 'Residential (House/Kothi)' },
+  { id: 'flat', label: 'Flat / Apartment' },
+  { id: 'farmhouse', label: 'Farmhouse' },
   { id: 'other', label: 'Other' },
 ];
 
 export const commercialOptions: { id: PropertySubType; label: string }[] = [
   { id: 'plot', label: 'Plot' },
-  { id: 'shop', label: 'Shop' },
-  { id: 'agriculture', label: 'Agriculture Land' },
-  { id: 'industry', label: 'Industry' },
+  { id: 'shop', label: 'Commercial' },
+  { id: 'agriculture', label: 'Agricultural Land' },
+  { id: 'industry', label: 'Industrial' },
   { id: 'other', label: 'Other' },
 ];
 
@@ -58,6 +59,9 @@ export const getTypeIdForSubType = (subType: PropertySubType, typesList: Propert
         (t) => t.name.toLowerCase().includes('flat') || t.name.toLowerCase().includes('apartment')
       )?.id || ''
     );
+  }
+  if (subType === 'farmhouse') {
+    return typesList.find((t) => t.name.toLowerCase().includes('farm'))?.id || '';
   }
   if (subType === 'shop') {
     return (
@@ -278,7 +282,7 @@ export const AddProperty: React.FC = () => {
         if (tid) setSelectedTypeId(tid);
       }
     } else {
-      if (selectedSubType === 'home' || selectedSubType === 'flat') {
+      if (selectedSubType === 'home' || selectedSubType === 'flat' || selectedSubType === 'farmhouse') {
         setSelectedSubType('shop');
         const tid = getTypeIdForSubType('shop', propertyTypes);
         if (tid) setSelectedTypeId(tid);
@@ -822,7 +826,7 @@ export const AddProperty: React.FC = () => {
                   Select {selectedCategory === 'residential' ? 'Residential' : 'Commercial'} Type:
                 </span>
                 <span className="text-[11px] text-slate-400">
-                  {selectedCategory === 'residential' ? '4 options' : '5 options'}
+                  {(selectedCategory === 'residential' ? residentialOptions : commercialOptions).length} options
                 </span>
               </div>
 
@@ -832,7 +836,7 @@ export const AddProperty: React.FC = () => {
                   return (
                     <label
                       key={opt.id}
-                      className={`flex-1 min-w-[110px] sm:min-w-[130px] flex items-center justify-center gap-2 py-2 px-3 rounded-xl border text-xs sm:text-sm font-medium cursor-pointer transition-all select-none text-center ${
+                      className={`flex-1 min-w-fit flex items-center justify-center gap-2 py-2 px-3.5 rounded-xl border text-xs sm:text-sm font-medium cursor-pointer transition-all select-none text-center ${
                         isSelected
                           ? 'border-brand-600 bg-brand-50/90 text-brand-700 dark:bg-brand-950/70 dark:border-brand-500 dark:text-brand-200 shadow-sm font-semibold ring-1 ring-brand-500/20'
                           : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 bg-slate-50/60 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300'
@@ -846,7 +850,7 @@ export const AddProperty: React.FC = () => {
                         onChange={() => handleSubTypeChange(opt.id)}
                         className="w-3.5 h-3.5 text-brand-600 focus:ring-brand-500 border-slate-300 dark:border-slate-600 cursor-pointer shrink-0"
                       />
-                      <span className="truncate">{opt.label}</span>
+                      <span className="whitespace-nowrap">{opt.label}</span>
                     </label>
                   );
                 })}
