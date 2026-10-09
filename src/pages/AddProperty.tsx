@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Building,
+  Building2,
+  Home,
   AlertTriangle,
   Loader2,
-  Trash2,
-  Edit3,
-  RefreshCw,
   Sparkles,
   Calculator,
   Compass,
@@ -13,14 +12,70 @@ import {
   X,
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { parsePriceInput, formatPrice, getPricePreview, type PriceUnit } from '../lib/price';
+import { parsePriceInput, getPricePreview, type PriceUnit } from '../lib/price';
 import { normalizePhone } from '../lib/phone';
-import type { Property, Sector, PropertyType, PropertyStatus, AreaUnit, DuplicatePhoneMatch } from '../types/database';
+import { formatPropertyId } from '../lib/propertyFormat';
+import type { Sector, PropertyType, PropertyStatus, AreaUnit, DuplicatePhoneMatch } from '../types/database';
+
+export type PropertyCategory = 'residential' | 'commercial';
+export type PropertySubType = 'plot' | 'home' | 'flat' | 'shop' | 'agriculture' | 'industry' | 'other';
+
+export const residentialOptions: { id: PropertySubType; label: string }[] = [
+  { id: 'plot', label: 'Plot' },
+  { id: 'home', label: 'Home' },
+  { id: 'flat', label: 'Flat' },
+  { id: 'other', label: 'Other' },
+];
+
+export const commercialOptions: { id: PropertySubType; label: string }[] = [
+  { id: 'plot', label: 'Plot' },
+  { id: 'shop', label: 'Shop' },
+  { id: 'agriculture', label: 'Agriculture Land' },
+  { id: 'industry', label: 'Industry' },
+  { id: 'other', label: 'Other' },
+];
+
+// Helper to match built-in subType to an existing PropertyType from database/mock
+export const getTypeIdForSubType = (subType: PropertySubType, typesList: PropertyType[]): string => {
+  if (subType === 'plot') {
+    return typesList.find((t) => t.name.toLowerCase() === 'plot' || t.name.toLowerCase().includes('plot'))?.id || '';
+  }
+  if (subType === 'home') {
+    return (
+      typesList.find(
+        (t) =>
+          t.name.toLowerCase() === 'home' ||
+          t.name.toLowerCase().includes('house') ||
+          t.name.toLowerCase().includes('kothi') ||
+          t.name.toLowerCase().includes('residential')
+      )?.id || ''
+    );
+  }
+  if (subType === 'flat') {
+    return (
+      typesList.find(
+        (t) => t.name.toLowerCase().includes('flat') || t.name.toLowerCase().includes('apartment')
+      )?.id || ''
+    );
+  }
+  if (subType === 'shop') {
+    return (
+      typesList.find(
+        (t) => t.name.toLowerCase().includes('shop') || t.name.toLowerCase().includes('commercial')
+      )?.id || ''
+    );
+  }
+  if (subType === 'agriculture') {
+    return typesList.find((t) => t.name.toLowerCase().includes('agri'))?.id || '';
+  }
+  if (subType === 'industry') {
+    return typesList.find((t) => t.name.toLowerCase().includes('industr'))?.id || '';
+  }
+  return '';
+};
 
 export const AddProperty: React.FC = () => {
-  const { isAdmin } = useAuth();
   const { showToast } = useToast();
 
   // Safe integer-only price→display string: avoids float rounding noise
@@ -43,7 +98,6 @@ export const AddProperty: React.FC = () => {
   // Reference Data
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [propertyTypes, setPropertyTypes] = useState<PropertyType[]>([]);
-  const [recentProperties, setRecentProperties] = useState<Property[]>([]);
 
   // Form State
   const [sectorInput, setSectorInput] = useState('');
@@ -60,6 +114,9 @@ export const AddProperty: React.FC = () => {
   const [houseNo, setHouseNo] = useState('');
   const [priceValue, setPriceValue] = useState('');
   const [priceUnit, setPriceUnit] = useState<PriceUnit>('Cr');
+  const [selectedCategory, setSelectedCategory] = useState<PropertyCategory>('residential');
+  const [selectedSubType, setSelectedSubType] = useState<PropertySubType>('plot');
+  const [otherTypeText, setOtherTypeText] = useState('');
   const [selectedTypeId, setSelectedTypeId] = useState('');
   const [areaSize, setAreaSize] = useState('');
   const [areaUnit, setAreaUnit] = useState<AreaUnit>('sq yard');
@@ -203,6 +260,56 @@ export const AddProperty: React.FC = () => {
     }
   };
 
+
+
+  // Category switch handler
+  const handleCategoryChange = (category: PropertyCategory) => {
+    setSelectedCategory(category);
+    if (selectedSubType === 'other') {
+      return;
+    }
+    if (category === 'residential') {
+      if (selectedSubType === 'shop' || selectedSubType === 'agriculture' || selectedSubType === 'industry') {
+        setSelectedSubType('home');
+        const tid = getTypeIdForSubType('home', propertyTypes);
+        if (tid) setSelectedTypeId(tid);
+      } else {
+        const tid = getTypeIdForSubType(selectedSubType, propertyTypes);
+        if (tid) setSelectedTypeId(tid);
+      }
+    } else {
+      if (selectedSubType === 'home' || selectedSubType === 'flat') {
+        setSelectedSubType('shop');
+        const tid = getTypeIdForSubType('shop', propertyTypes);
+        if (tid) setSelectedTypeId(tid);
+      } else {
+        const tid = getTypeIdForSubType(selectedSubType, propertyTypes);
+        if (tid) setSelectedTypeId(tid);
+      }
+    }
+  };
+
+  // Sub-type radio switch handler
+  const handleSubTypeChange = (subType: PropertySubType) => {
+    setSelectedSubType(subType);
+    if (subType === 'other') {
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next.type;
+        return next;
+      });
+    } else {
+      const tid = getTypeIdForSubType(subType, propertyTypes);
+      if (tid) setSelectedTypeId(tid);
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next.type;
+        delete next.otherType;
+        return next;
+      });
+    }
+  };
+
   // Phone duplicate warning state
   const [duplicateMatches, setDuplicateMatches] = useState<DuplicatePhoneMatch[]>([]);
   const [isCheckingPhone, setIsCheckingPhone] = useState(false);
@@ -214,10 +321,7 @@ export const AddProperty: React.FC = () => {
   // Editing state
   const [editingPropertyId, setEditingPropertyId] = useState<string | null>(null);
 
-  // Delete confirmation
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-
-  // Fetch reference lists and recent entries
+  // Fetch reference lists (sectors & property types)
   const loadData = async () => {
     try {
       if (!isSupabaseConfigured) {
@@ -240,11 +344,6 @@ export const AddProperty: React.FC = () => {
         setSectors(mockSectors);
         setPropertyTypes(mockTypes);
         setSelectedTypeId(mockTypes[0].id);
-
-        const savedRecent = localStorage.getItem('re_mock_properties');
-        if (savedRecent) {
-          setRecentProperties(JSON.parse(savedRecent));
-        }
         return;
       }
 
@@ -264,41 +363,9 @@ export const AddProperty: React.FC = () => {
       if (typeData) {
         setPropertyTypes(typeData);
         if (typeData.length > 0 && !selectedTypeId) {
-          setSelectedTypeId(typeData[0].id);
+          const defaultPlot = typeData.find((t) => t.name.toLowerCase().includes('plot')) || typeData[0];
+          setSelectedTypeId(defaultPlot.id);
         }
-      }
-
-      // Fetch recent 10 properties (Direct select on properties table; notice contact phone is never exposed here)
-      const { data: propsData } = await supabase
-        .from('properties')
-        .select(`
-          id,
-          plot_no,
-          plot_id,
-          sector_id,
-          location,
-          house_no,
-          price,
-          type_id,
-          area_size,
-          area_unit,
-          details,
-          status,
-          created_at,
-          sectors(name),
-          property_types(name)
-        `)
-        .eq('is_deleted', false)
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      if (propsData) {
-        const formatted: Property[] = propsData.map((p: any) => ({
-          ...p,
-          sector_name: p.sectors?.name,
-          type_name: p.property_types?.name,
-        }));
-        setRecentProperties(formatted);
       }
     } catch {
       showToast({ type: 'error', title: 'Network Error', message: 'Failed to load reference data' });
@@ -356,7 +423,11 @@ export const AddProperty: React.FC = () => {
     setHouseNo('');
     setPriceValue('');
     setPriceUnit('Cr');
-    if (propertyTypes.length > 0) setSelectedTypeId(propertyTypes[0].id);
+    setSelectedCategory('residential');
+    setSelectedSubType('plot');
+    setOtherTypeText('');
+    const defaultPlot = propertyTypes.find((t) => t.name.toLowerCase().includes('plot')) || propertyTypes[0];
+    if (defaultPlot) setSelectedTypeId(defaultPlot.id);
     setAreaSize('');
     setAreaUnit('sq yard');
     setOwnerName('');
@@ -385,8 +456,15 @@ export const AddProperty: React.FC = () => {
       newErrors.price = 'Enter a valid positive price (max 2 decimals)';
     }
 
-    if (!selectedTypeId) {
-      newErrors.type = 'Please select a property type';
+    if (selectedSubType === 'other') {
+      if (!otherTypeText.trim()) {
+        newErrors.otherType = 'Please fill the other property type';
+      }
+    } else {
+      const tid = selectedTypeId || getTypeIdForSubType(selectedSubType, propertyTypes);
+      if (!tid) {
+        newErrors.type = 'Please select a property type';
+      }
     }
 
     const normPhone = normalizePhone(ownerPhone);
@@ -458,6 +536,50 @@ export const AddProperty: React.FC = () => {
           : metaPrefix
         : details.trim() || null;
 
+      // Resolve final type ID (supporting dynamic 'other' custom type)
+      let finalTypeId = selectedTypeId;
+      if (selectedSubType === 'other') {
+        const cleanTypeName = otherTypeText.trim();
+        const existingType = propertyTypes.find(
+          (t) => t.name.trim().toLowerCase() === cleanTypeName.toLowerCase()
+        );
+        if (existingType) {
+          finalTypeId = existingType.id;
+        } else {
+          if (!isSupabaseConfigured) {
+            const newType: PropertyType = {
+              id: 'type-' + Date.now(),
+              name: cleanTypeName,
+              sort_order: propertyTypes.length + 1,
+            };
+            setPropertyTypes((prev) => [...prev, newType]);
+            finalTypeId = newType.id;
+          } else {
+            const { data: newTypeData, error: typeCreateError } = await supabase
+              .from('property_types')
+              .insert({ name: cleanTypeName, sort_order: propertyTypes.length + 1 })
+              .select('id, name, sort_order')
+              .single();
+
+            if (typeCreateError) {
+              throw new Error(`Failed to create property type: ${typeCreateError.message}`);
+            }
+            if (newTypeData) {
+              setPropertyTypes((prev) => [...prev, newTypeData]);
+              finalTypeId = newTypeData.id;
+            }
+          }
+        }
+      } else {
+        if (!finalTypeId) {
+          finalTypeId = getTypeIdForSubType(selectedSubType, propertyTypes);
+        }
+      }
+
+      if (!finalTypeId) {
+        throw new Error('Please select a valid property type');
+      }
+
       if (!isSupabaseConfigured) {
         // Mock save
         const savedList = JSON.parse(localStorage.getItem('re_mock_properties') || '[]');
@@ -471,8 +593,8 @@ export const AddProperty: React.FC = () => {
                   location: location.trim(),
                   house_no: houseNo.trim() || null,
                   price: parsedPrice,
-                  type_id: selectedTypeId,
-                  type_name: propertyTypes.find((t) => t.id === selectedTypeId)?.name,
+                  type_id: finalTypeId,
+                  type_name: propertyTypes.find((t) => t.id === finalTypeId)?.name || otherTypeText.trim(),
                   area_size: areaSize ? Number(areaSize) : null,
                   area_unit: areaUnit,
                   details: finalDetails,
@@ -486,7 +608,7 @@ export const AddProperty: React.FC = () => {
           showToast({ type: 'success', title: 'Property Updated', message: 'Details updated successfully' });
         } else {
           const nextPlotNo = savedList.length + 1;
-          const newPlotId = `P-${String(nextPlotNo).padStart(4, '0')}`;
+          const newPlotId = `JSK-${String(nextPlotNo).padStart(4, '0')}`;
           const newProp = {
             id: 'mock-prop-' + Date.now(),
             plot_no: nextPlotNo,
@@ -496,8 +618,8 @@ export const AddProperty: React.FC = () => {
             location: location.trim(),
             house_no: houseNo.trim() || null,
             price: parsedPrice,
-            type_id: selectedTypeId,
-            type_name: propertyTypes.find((t) => t.id === selectedTypeId)?.name,
+            type_id: finalTypeId,
+            type_name: propertyTypes.find((t) => t.id === finalTypeId)?.name || otherTypeText.trim(),
             area_size: areaSize ? Number(areaSize) : null,
             area_unit: areaUnit,
             details: finalDetails,
@@ -510,7 +632,7 @@ export const AddProperty: React.FC = () => {
           showToast({
             type: 'success',
             title: `Property Saved!`,
-            message: `New Plot ID: ${newPlotId} registered successfully.`,
+            message: `New Property ID: ${formatPropertyId(newPlotId)} registered successfully.`,
             duration: 6000,
           });
         }
@@ -528,7 +650,7 @@ export const AddProperty: React.FC = () => {
           p_location: location.trim(),
           p_house_no: houseNo.trim() || null,
           p_price: parsedPrice,
-          p_type_id: selectedTypeId,
+          p_type_id: finalTypeId,
           p_area_size: areaSize ? Number(areaSize) : null,
           p_area_unit: areaUnit || null,
           p_details: finalDetails,
@@ -550,7 +672,7 @@ export const AddProperty: React.FC = () => {
           p_location: location.trim(),
           p_house_no: houseNo.trim() || null,
           p_price: parsedPrice,
-          p_type_id: selectedTypeId,
+          p_type_id: finalTypeId,
           p_area_size: areaSize ? Number(areaSize) : null,
           p_area_unit: areaUnit || null,
           p_details: finalDetails,
@@ -561,11 +683,12 @@ export const AddProperty: React.FC = () => {
 
         if (createError) throw createError;
 
-        const newPlotId = data?.[0]?.plot_id || 'P-0000';
+        const rawPlotId = data?.[0]?.plot_id || 'JSK-0000';
+        const assignedId = formatPropertyId(rawPlotId);
         showToast({
           type: 'success',
-          title: `Plot ID: ${newPlotId}`,
-          message: `Saved successfully! Assigned ${newPlotId}`,
+          title: `Property ID: ${assignedId}`,
+          message: `Saved successfully! Assigned ${assignedId}`,
           duration: 6000,
         });
       }
@@ -580,129 +703,6 @@ export const AddProperty: React.FC = () => {
       });
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  // Start Editing Property (Calls get_property_for_edit)
-  const handleEditClick = async (propId: string) => {
-    setEditingPropertyId(propId);
-    try {
-      if (!isSupabaseConfigured) {
-        const mockRecent = JSON.parse(localStorage.getItem('re_mock_properties') || '[]');
-        const p = mockRecent.find((x: any) => x.id === propId);
-        if (p) {
-          setSectorInput(p.sector_name || sectors.find((s) => s.id === p.sector_id)?.name || '');
-          setLocation(p.location);
-          setHouseNo(p.house_no || '');
-          // price - use integer arithmetic to avoid float noise
-          const { val, unit } = priceToDisplayVal(p.price);
-          setPriceValue(val);
-          setPriceUnit(unit);
-          setSelectedTypeId(p.type_id);
-          setAreaSize(p.area_size ? String(p.area_size) : '');
-          setAreaUnit(p.area_unit || 'sq yard');
-          setOwnerName(p._mockContactName || '');
-          setOwnerPhone(p._mockPhone || '');
-          setStatus(p.status);
-
-          // Parse dimensions and rate if present in details
-          let cleanDetails = p.details || '';
-          const metaMatch = cleanDetails.match(/^\[(.*?)\]\s*(.*)$/s);
-          if (metaMatch) {
-            const metaContent = metaMatch[1];
-            cleanDetails = metaMatch[2] || '';
-            const dimMatch = metaContent.match(/Dim:\s*(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)\s*ft/i);
-            if (dimMatch) {
-              setLengthFt(dimMatch[1]);
-              setBreadthFt(dimMatch[2]);
-            }
-            const rateMatch = metaContent.match(/Rate:\s*₹?([\d,]+)\/(\w+)/i);
-            if (rateMatch) {
-              setRateValue(rateMatch[1].replace(/,/g, ''));
-              const rUnit = rateMatch[2].toLowerCase();
-              if (rUnit.includes('sq') || rUnit.includes('ft')) setRateUnit('per_sqft');
-              else if (rUnit.includes('acre')) setRateUnit('per_acre');
-              else setRateUnit('per_gaj');
-            }
-          }
-          setDetails(cleanDetails);
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-        return;
-      }
-
-      const { data, error } = await supabase.rpc('get_property_for_edit', { p_id: propId });
-      if (error) throw error;
-      if (data && data.length > 0) {
-        const item = data[0];
-        setSectorInput(item.sector_name || sectors.find((s) => s.id === item.sector_id)?.name || '');
-        setLocation(item.location);
-        setHouseNo(item.house_no || '');
-        const { val: pVal, unit: pUnit } = priceToDisplayVal(item.price);
-        setPriceValue(pVal);
-        setPriceUnit(pUnit);
-        setSelectedTypeId(item.type_id);
-        setAreaSize(item.area_size ? String(item.area_size) : '');
-        setAreaUnit((item.area_unit as AreaUnit) || 'sq yard');
-        setOwnerName(item.contact_name || '');
-        setOwnerPhone(item.phone || '');
-        setStatus(item.status as PropertyStatus);
-
-        // Parse dimensions and rate if present in details
-        let cleanDetails = item.details || '';
-        const metaMatch = cleanDetails.match(/^\[(.*?)\]\s*(.*)$/s);
-        if (metaMatch) {
-          const metaContent = metaMatch[1];
-          cleanDetails = metaMatch[2] || '';
-          const dimMatch = metaContent.match(/Dim:\s*(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)\s*ft/i);
-          if (dimMatch) {
-            setLengthFt(dimMatch[1]);
-            setBreadthFt(dimMatch[2]);
-          }
-          const rateMatch = metaContent.match(/Rate:\s*₹?([\d,]+)\/(\w+)/i);
-          if (rateMatch) {
-            setRateValue(rateMatch[1].replace(/,/g, ''));
-            const rUnit = rateMatch[2].toLowerCase();
-            if (rUnit.includes('sq') || rUnit.includes('ft')) setRateUnit('per_sqft');
-            else if (rUnit.includes('acre')) setRateUnit('per_acre');
-            else setRateUnit('per_gaj');
-          }
-        }
-        setDetails(cleanDetails);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      }
-    } catch (err: any) {
-      showToast({ type: 'error', title: 'Edit Failed', message: err.message || 'Could not fetch property for edit' });
-      setEditingPropertyId(null);
-    }
-  };
-
-  // Delete property (Admin only)
-  const handleDeleteProperty = async (propId: string) => {
-    if (!isAdmin) {
-      showToast({ type: 'error', title: 'Permission Denied', message: 'Only administrators can delete properties.' });
-      return;
-    }
-
-    try {
-      if (!isSupabaseConfigured) {
-        const saved = JSON.parse(localStorage.getItem('re_mock_properties') || '[]');
-        const filtered = saved.filter((p: any) => p.id !== propId);
-        localStorage.setItem('re_mock_properties', JSON.stringify(filtered));
-        showToast({ type: 'success', title: 'Deleted', message: 'Property soft deleted successfully' });
-        setDeletingId(null);
-        loadData();
-        return;
-      }
-
-      const { error } = await supabase.rpc('soft_delete_property', { p_id: propId });
-      if (error) throw error;
-
-      showToast({ type: 'success', title: 'Deleted', message: 'Property soft deleted successfully' });
-      setDeletingId(null);
-      await loadData();
-    } catch (err: any) {
-      showToast({ type: 'error', title: 'Delete Failed', message: err.message || 'Failed to soft delete property' });
     }
   };
 
@@ -736,39 +736,150 @@ export const AddProperty: React.FC = () => {
       {/* Main Form Card - Compact Layout */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-7 border border-slate-200 dark:border-slate-800 shadow-xl">
         <form onSubmit={handleSave} className="space-y-4">
-          {/* Line 1: Property Type (Full-Width 1-Click Radio Buttons) */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                Property Type <span className="text-rose-500">*</span>
+          {/* Line 1: Property Category & Type Selection */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                <span>Property Category & Type</span>
+                <span className="text-rose-500">*</span>
               </label>
               <span className="text-[11px] text-slate-400">1-click select</span>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {propertyTypes.map((type) => {
-                const isSelected = selectedTypeId === type.id;
-                return (
-                  <label
-                    key={type.id}
-                    className={`flex-1 min-w-[130px] sm:min-w-[140px] flex items-center justify-center gap-2 py-2 px-3 rounded-xl border text-xs sm:text-sm font-medium cursor-pointer transition-all select-none text-center ${
-                      isSelected
-                        ? 'border-brand-600 bg-brand-50/90 text-brand-700 dark:bg-brand-950/70 dark:border-brand-500 dark:text-brand-200 shadow-sm font-semibold ring-1 ring-brand-500/20'
-                        : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 bg-slate-50/60 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="propertyTypeRadio"
-                      value={type.id}
-                      checked={isSelected}
-                      onChange={() => setSelectedTypeId(type.id)}
-                      className="w-3.5 h-3.5 text-brand-600 focus:ring-brand-500 border-slate-300 dark:border-slate-600 cursor-pointer shrink-0"
-                    />
-                    <span className="truncate">{type.name}</span>
-                  </label>
-                );
-              })}
+
+            {/* Step 1: Top 2 Options (Residential vs Commercial) */}
+            <div className="grid grid-cols-2 gap-3">
+              {/* Option 1: Residential */}
+              <button
+                type="button"
+                id="category-residential-btn"
+                onClick={() => handleCategoryChange('residential')}
+                className={`group relative flex items-center gap-3 p-3 sm:p-3.5 rounded-2xl border transition-all text-left ${
+                  selectedCategory === 'residential'
+                    ? 'border-brand-600 bg-gradient-to-r from-brand-50/90 to-brand-100/50 dark:from-brand-950/80 dark:to-brand-900/40 text-brand-950 dark:text-brand-100 ring-2 ring-brand-500/20 shadow-sm'
+                    : 'border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-slate-100/70 dark:hover:bg-slate-800/80'
+                }`}
+              >
+                <div
+                  className={`p-2 rounded-xl transition-colors shrink-0 ${
+                    selectedCategory === 'residential'
+                      ? 'bg-brand-600 text-white shadow-sm'
+                      : 'bg-white dark:bg-slate-700 text-slate-500 dark:text-slate-400 group-hover:text-brand-600 dark:group-hover:text-brand-400'
+                  }`}
+                >
+                  <Home className="w-5 h-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs sm:text-sm font-bold tracking-tight">Residential</span>
+                    {selectedCategory === 'residential' && (
+                      <span className="w-2 h-2 rounded-full bg-brand-600 dark:bg-brand-400" />
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                    Plot, Home, Flat & more
+                  </p>
+                </div>
+              </button>
+
+              {/* Option 2: Commercial */}
+              <button
+                type="button"
+                id="category-commercial-btn"
+                onClick={() => handleCategoryChange('commercial')}
+                className={`group relative flex items-center gap-3 p-3 sm:p-3.5 rounded-2xl border transition-all text-left ${
+                  selectedCategory === 'commercial'
+                    ? 'border-brand-600 bg-gradient-to-r from-brand-50/90 to-brand-100/50 dark:from-brand-950/80 dark:to-brand-900/40 text-brand-950 dark:text-brand-100 ring-2 ring-brand-500/20 shadow-sm'
+                    : 'border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-slate-100/70 dark:hover:bg-slate-800/80'
+                }`}
+              >
+                <div
+                  className={`p-2 rounded-xl transition-colors shrink-0 ${
+                    selectedCategory === 'commercial'
+                      ? 'bg-brand-600 text-white shadow-sm'
+                      : 'bg-white dark:bg-slate-700 text-slate-500 dark:text-slate-400 group-hover:text-brand-600 dark:group-hover:text-brand-400'
+                  }`}
+                >
+                  <Building2 className="w-5 h-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs sm:text-sm font-bold tracking-tight">Commercial</span>
+                    {selectedCategory === 'commercial' && (
+                      <span className="w-2 h-2 rounded-full bg-brand-600 dark:bg-brand-400" />
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                    Plot, Shop, Agri, Industry
+                  </p>
+                </div>
+              </button>
             </div>
+
+            {/* Step 2: Dynamic Radio Buttons for the selected category */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                  Select {selectedCategory === 'residential' ? 'Residential' : 'Commercial'} Type:
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  {selectedCategory === 'residential' ? '4 options' : '5 options'}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {(selectedCategory === 'residential' ? residentialOptions : commercialOptions).map((opt) => {
+                  const isSelected = selectedSubType === opt.id;
+                  return (
+                    <label
+                      key={opt.id}
+                      className={`flex-1 min-w-[110px] sm:min-w-[130px] flex items-center justify-center gap-2 py-2 px-3 rounded-xl border text-xs sm:text-sm font-medium cursor-pointer transition-all select-none text-center ${
+                        isSelected
+                          ? 'border-brand-600 bg-brand-50/90 text-brand-700 dark:bg-brand-950/70 dark:border-brand-500 dark:text-brand-200 shadow-sm font-semibold ring-1 ring-brand-500/20'
+                          : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 bg-slate-50/60 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="propertySubTypeRadio"
+                        value={opt.id}
+                        checked={isSelected}
+                        onChange={() => handleSubTypeChange(opt.id)}
+                        className="w-3.5 h-3.5 text-brand-600 focus:ring-brand-500 border-slate-300 dark:border-slate-600 cursor-pointer shrink-0"
+                      />
+                      <span className="truncate">{opt.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+
+              {/* Step 3: "Other" Input field when other is selected */}
+              {selectedSubType === 'other' && (
+                <div className="pt-1.5">
+                  <input
+                    type="text"
+                    id="other-type-input"
+                    placeholder="Fill other type"
+                    value={otherTypeText}
+                    onChange={(e) => {
+                      setOtherTypeText(e.target.value);
+                      if (errors.otherType) {
+                        setErrors((prev) => {
+                          const next = { ...prev };
+                          delete next.otherType;
+                          return next;
+                        });
+                      }
+                    }}
+                    autoFocus
+                    className="w-full py-2.5 px-3.5 bg-slate-50 dark:bg-slate-800 border border-brand-300 dark:border-brand-700 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white placeholder-slate-400 font-medium shadow-inner"
+                  />
+                  {errors.otherType && (
+                    <p className="text-xs text-rose-500 mt-1 font-medium">{errors.otherType}</p>
+                  )}
+                </div>
+              )}
+            </div>
+
             {errors.type && <p className="text-xs text-rose-500 mt-1">{errors.type}</p>}
           </div>
 
@@ -1104,7 +1215,7 @@ export const AddProperty: React.FC = () => {
                   <div className="mt-1 flex flex-wrap gap-1">
                     {duplicateMatches.map((m, idx) => (
                       <span key={idx} className="font-mono font-semibold px-2 py-0.5 rounded bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-700 text-[11px]">
-                        {m.plot_id}{m.location ? ` (${m.location})` : ''}
+                        {formatPropertyId(m.plot_id)}{m.location ? ` (${m.location})` : ''}
                       </span>
                     ))}
                   </div>
@@ -1153,123 +1264,6 @@ export const AddProperty: React.FC = () => {
           </div>
         </form>
       </div>
-
-      {/* Section: Recent Entries List */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold text-slate-900 dark:text-white">Recent Entries</h2>
-          <button
-            onClick={loadData}
-            className="p-2 text-slate-500 hover:text-slate-900 dark:hover:text-white rounded-lg"
-            title="Refresh"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
-        </div>
-
-        {recentProperties.length === 0 ? (
-          <div className="p-8 text-center rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500">
-            No properties registered yet. Fill the form above to add your first listing!
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-3">
-            {recentProperties.map((item) => (
-              <div
-                key={item.id}
-                className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm hover:border-slate-300 dark:hover:border-slate-700 transition-all"
-              >
-                <div className="flex items-start gap-3">
-                  <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
-                    {item.plot_id}
-                  </span>
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                      <span>{item.type_name || 'Property'}</span>
-                      <span className="text-xs font-normal text-slate-500">in {item.sector_name || item.location || 'N/A'}</span>
-                    </h3>
-                    {(item.location || item.house_no) && (
-                      <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-                        {[item.location, item.house_no ? `(No: ${item.house_no})` : ''].filter(Boolean).join(' ')}
-                      </p>
-                    )}
-                    <div className="flex items-center gap-3 mt-1.5 text-xs">
-                      <span className="font-semibold text-brand-600 dark:text-brand-400">{formatPrice(item.price)}</span>
-                      {item.area_size && (
-                        <span className="text-slate-500">
-                          {item.area_size} {item.area_unit}
-                        </span>
-                      )}
-                      <span
-                        className={`capitalize px-2 py-0.5 rounded text-[11px] font-semibold ${
-                          item.status === 'available'
-                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                            : item.status === 'hold'
-                            ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
-                            : 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
-                        }`}
-                      >
-                        {item.status}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Actions: Edit & Delete */}
-                <div className="flex items-center gap-2 self-end sm:self-center">
-                  <button
-                    type="button"
-                    onClick={() => handleEditClick(item.id)}
-                    className="p-2 rounded-lg text-slate-600 dark:text-slate-400 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-950/40 text-xs font-medium flex items-center gap-1 min-h-[44px] min-w-[44px] justify-center"
-                    title="Edit Property"
-                  >
-                    <Edit3 className="w-4 h-4" />
-                    <span className="sm:hidden">Edit</span>
-                  </button>
-
-                  {isAdmin && (
-                    <button
-                      type="button"
-                      onClick={() => setDeletingId(item.id)}
-                      className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 min-h-[44px] min-w-[44px] flex items-center justify-center"
-                      title="Delete Property (Admin Only)"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Admin Delete Confirmation Modal */}
-      {deletingId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-sm w-full border border-slate-200 dark:border-slate-800 shadow-2xl">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white mb-2">Soft Delete Property?</h3>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
-              This property will be marked as deleted and hidden from search. The Plot ID will never be reused.
-            </p>
-            <div className="flex gap-2 justify-end">
-              <button
-                type="button"
-                onClick={() => setDeletingId(null)}
-                className="px-4 py-2 text-sm rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => handleDeleteProperty(deletingId)}
-                className="px-4 py-2 text-sm rounded-xl bg-rose-600 text-white font-semibold hover:bg-rose-700"
-              >
-                Confirm Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

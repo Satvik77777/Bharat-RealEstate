@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { parsePriceInput, formatPrice, getPricePreview } from '../price';
 import { normalizePhone, isValidPhone } from '../phone';
 import { buildWhatsAppLink, formatPropertiesMessage, type WhatsAppPropertyItem } from '../whatsapp';
+import { formatPropertyId, formatPropertiesText } from '../propertyFormat';
 import { csvEscapeCell, generateCsv } from '../csv';
 
 describe('Price Parsing (parsePriceInput)', () => {
@@ -158,15 +159,89 @@ describe('WhatsApp Link & Message Generation', () => {
 
   it('caps property list messages strictly at 10 items and warns if more exist', () => {
     const msg = formatPropertiesMessage(dummyProps);
-    expect(msg).toContain('1. *[P-0001]*');
-    expect(msg).toContain('10. *[P-00010]*');
-    expect(msg).not.toContain('11. *[P-00011]*');
+    expect(msg).toContain('1. *[JSK-0001]*');
+    expect(msg).toContain('10. *[JSK-00010]*');
+    expect(msg).not.toContain('11. *[JSK-00011]*');
     expect(msg).toContain('Showing 10 of 14 properties. Please contact us for the remaining 4 options.');
   });
 
   it('handles empty properties list gracefully', () => {
     const msg = formatPropertiesMessage([]);
     expect(msg).toBe('No properties selected.');
+  });
+});
+
+describe('Property ID & Copy Text Formatting (propertyFormat)', () => {
+  it('normalizes various ID formats to JSK-XXXX standard', () => {
+    expect(formatPropertyId('P-0024')).toBe('JSK-0024');
+    expect(formatPropertyId('P-0001')).toBe('JSK-0001');
+    expect(formatPropertyId('JSK-0024')).toBe('JSK-0024');
+    expect(formatPropertyId('24')).toBe('JSK-0024');
+    expect(formatPropertyId(null)).toBe('JSK-0000');
+  });
+
+  it('formats single property text with Price, Property ID, details, and optional CTA footer', () => {
+    const item = {
+      plot_id: 'P-0024',
+      price: 30000000,
+      type_name: 'Plot',
+      location: 'near market',
+      house_no: '2135',
+      sector_name: 'Sector 7',
+      area_size: 75,
+      area_unit: 'sq yard',
+      status: 'AVAILABLE',
+      details: 'south facing',
+    };
+
+    const textWithCta = formatPropertiesText([item], { includeContactCta: true });
+    expect(textWithCta).toContain('Property ID: JSK-0024');
+    expect(textWithCta).toContain('Price: ₹3 Cr');
+    expect(textWithCta).toContain('Type: Plot');
+    expect(textWithCta).toContain('Location: near market');
+    expect(textWithCta).toContain('House No: 2135');
+    expect(textWithCta).toContain('Sector: Sector 7');
+    expect(textWithCta).toContain('Area: 75 sq yard');
+    expect(textWithCta).toContain('Status: AVAILABLE');
+    expect(textWithCta).toContain('Price: ₹3 Cr asking (negotiable)');
+    expect(textWithCta).toContain('Details: south facing');
+    expect(textWithCta).toContain('Interested?');
+    expect(textWithCta).toContain('Call/whatsapp : 80178-80178');
+
+    // Test location & house no hiding when showLocation is false
+    const textWithoutLoc = formatPropertiesText([item], { showLocation: false, includeContactCta: true });
+    expect(textWithoutLoc).not.toContain('Location:');
+    expect(textWithoutLoc).not.toContain('House No:');
+    expect(textWithoutLoc).toContain('Price: ₹3 Cr asking (negotiable)');
+
+    const textWithoutCta = formatPropertiesText([item], { includeContactCta: false });
+    expect(textWithoutCta).not.toContain('Interested?');
+    expect(textWithoutCta).not.toContain('Call/whatsapp');
+  });
+
+  it('formats multiple selected properties with dividers and single footer at end', () => {
+    const items = [
+      {
+        plot_id: 'P-0001',
+        price: 15000000,
+        type_name: 'Plot',
+        sector_name: 'Sector 7',
+      },
+      {
+        plot_id: 'P-0002',
+        price: 30000000,
+        type_name: 'Flat',
+        sector_name: 'Sector 7',
+      },
+    ];
+
+    const multiText = formatPropertiesText(items, { includeContactCta: true });
+    expect(multiText).toContain('Property ID: JSK-0001');
+    expect(multiText).toContain('Price: ₹1.5 Cr asking (negotiable)');
+    expect(multiText).toContain('Property ID: JSK-0002');
+    expect(multiText).toContain('Price: ₹3 Cr asking (negotiable)');
+    expect(multiText).toContain('----------------------------------------');
+    expect(multiText).toContain('Interested?\nCall/whatsapp : 80178-80178');
   });
 });
 

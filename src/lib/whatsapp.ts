@@ -5,6 +5,9 @@
 
 import { normalizePhone } from './phone';
 import { formatPrice } from './price';
+import { formatPropertyId, DEFAULT_CONTACT_CTA } from './propertyFormat';
+
+export { formatPropertyId, DEFAULT_CONTACT_CTA } from './propertyFormat';
 
 export interface WhatsAppPropertyItem {
   plot_id: string;
@@ -42,7 +45,8 @@ export function buildWhatsAppLink(phone: string | null | undefined, message: str
  */
 export function formatPropertiesMessage(
   properties: WhatsAppPropertyItem[],
-  customHeader?: string
+  customHeader?: string,
+  options?: { includeContactCta?: boolean; contactCtaText?: string }
 ): string {
   if (!properties || properties.length === 0) {
     return 'No properties selected.';
@@ -63,12 +67,13 @@ export function formatPropertiesMessage(
   }
 
   itemsToInclude.forEach((p, idx) => {
+    const propId = formatPropertyId(p.plot_id);
     const priceStr = formatPrice(p.price);
     const areaStr = p.area_size ? `${p.area_size} ${p.area_unit || ''}`.trim() : null;
     const typeStr = p.type_name || 'Property';
     const sectorStr = p.sector_name || p.location || 'Prime Location';
 
-    lines.push(`${idx + 1}. *[${p.plot_id}]* ${typeStr} in ${sectorStr}`);
+    lines.push(`${idx + 1}. *[${propId}]* ${typeStr} in ${sectorStr}`);
     lines.push(`   💰 Price: ${priceStr}`);
     if (areaStr) {
       lines.push(`   📐 Area: ${areaStr}`);
@@ -87,7 +92,10 @@ export function formatPropertiesMessage(
     lines.push('');
   }
 
-  lines.push('Interested in any of these? Reply here or call us directly!');
+  if (options?.includeContactCta !== false) {
+    const cta = options?.contactCtaText || DEFAULT_CONTACT_CTA;
+    lines.push(cta);
+  }
 
   return lines.join('\n').trim();
 }

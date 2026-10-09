@@ -158,7 +158,7 @@ BEGIN
     IF NEW.plot_no IS NULL THEN
       NEW.plot_no := nextval('public.property_plot_no_seq');
     END IF;
-    NEW.plot_id := 'P-' || lpad(NEW.plot_no::text, 4, '0');
+    NEW.plot_id := 'JSK-' || lpad(NEW.plot_no::text, 4, '0');
   ELSE
     -- Never allow altering plot_no or plot_id on update
     NEW.plot_no := OLD.plot_no;

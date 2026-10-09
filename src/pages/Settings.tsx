@@ -17,6 +17,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { generateCsv, downloadCsv } from '../lib/csv';
 import { formatPrice } from '../lib/price';
+import { formatPropertyId } from '../lib/propertyFormat';
 import type { Sector, PropertyType } from '../types/database';
 
 export const Settings: React.FC = () => {
@@ -241,9 +242,9 @@ export const Settings: React.FC = () => {
         const mockBuyers = JSON.parse(localStorage.getItem('re_mock_buyers') || '[]');
 
         // Generate properties CSV
-        const propHeaders = ['Plot ID', 'Sector', 'Location', 'Price (Rs)', 'Type', 'Area', 'Status', 'Owner Name', 'Owner Phone'];
+        const propHeaders = ['Property ID', 'Sector', 'Location', 'Price (Rs)', 'Type', 'Area', 'Status', 'Owner Name', 'Owner Phone'];
         const propRows = mockProps.map((p: any) => [
-          p.plot_id,
+          formatPropertyId(p.plot_id),
           p.sector_name,
           p.location,
           p.price,
@@ -282,7 +283,7 @@ export const Settings: React.FC = () => {
         // 1. Export Properties with Owner Phones
         if (data.properties && Array.isArray(data.properties)) {
           const headers = [
-            'Plot ID',
+            'Property ID',
             'Sector',
             'Location',
             'House No',
@@ -298,7 +299,7 @@ export const Settings: React.FC = () => {
             'Is Deleted',
           ];
           const rows = data.properties.map((p: any) => [
-            p.plot_id,
+            formatPropertyId(p.plot_id),
             p.sector || '',
             p.location || '',
             p.house_no || '',
