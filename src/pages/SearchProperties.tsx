@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Search,
   MessageCircle,
@@ -27,6 +27,7 @@ import {
   Building2,
   Trash2,
   Archive,
+  Pencil,
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useToast } from '../context/ToastContext';
@@ -34,7 +35,8 @@ import { parsePriceInput, formatPrice, type PriceUnit } from '../lib/price';
 import { normalizePhone } from '../lib/phone';
 import { buildWhatsAppLink } from '../lib/whatsapp';
 import { formatPropertyId, formatPropertiesText } from '../lib/propertyFormat';
-import { generateCsv, downloadCsv } from '../lib/csv';
+import { generateCsv, downloadCsv, buildPropertyCsvData } from '../lib/csv';
+import { getCachedReferenceData } from '../lib/referenceCache';
 import type { Property, Sector, PropertyType } from '../types/database';
 import {
   type PropertyCategory,
@@ -119,8 +121,8 @@ export const SearchProperties: React.FC = () => {
   // Phone visibility security toggle (default false - ensures phone is absent from response)
   const [showPhone, setShowPhone] = useState(searchParams.get('showPhone') === 'true');
 
-  // Location and house number visibility toggle (controls both table display and clipboard copy)
-  const [showLocation, setShowLocation] = useState(true);
+  // House number visibility toggle (Location is always shown; only House No is toggled)
+  const [showHouseNo, setShowHouseNo] = useState(false);
 
   // Search execution status: ensures results only appear after search or view all, and disappear on reset
   const [hasSearched, setHasSearched] = useState(false);
@@ -130,7 +132,44 @@ export const SearchProperties: React.FC = () => {
   const [soldProperties, setSoldProperties] = useState<Property[]>([]);
   const [soldCount, setSoldCount] = useState(0);
   const [isSoldLoading, setIsSoldLoading] = useState(false);
-  const [propertyToMarkSold, setPropertyToMarkSold] = useState<Property | null>(null);
+  const [propertyToDelete, setPropertyToDelete] = useState<Property | null>(null);
+  const [activeActionMenuId, setActiveActionMenuId] = useState<string | null>(null);
+
+  const navigate = useNavigate();
+
+  // Close action menu on click outside
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('.action-menu-container')) {
+        setActiveActionMenuId(null);
+      }
+    };
+    if (activeActionMenuId) {
+      document.addEventListener('mousedown', handleOutsideClick);
+      return () => document.removeEventListener('mousedown', handleOutsideClick);
+    }
+  }, [activeActionMenuId]);
+
+  // Global Keyboard shortcuts: '/' or 'Ctrl+K' to focus search input, 'Escape' to dismiss menus/modals
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setActiveActionMenuId(null);
+        setPropertyToDelete(null);
+        setIsMobileFiltersOpen(false);
+      } else if (
+        (e.key === '/' || (e.ctrlKey && e.key.toLowerCase() === 'k')) &&
+        document.activeElement?.tagName !== 'INPUT' &&
+        document.activeElement?.tagName !== 'TEXTAREA'
+      ) {
+        e.preventDefault();
+        const searchInput = document.querySelector<HTMLInputElement>('input[placeholder*="Sector"], input[placeholder*="search" i]');
+        searchInput?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Mobile collapsible filter drawer toggle
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
@@ -207,12 +246,9 @@ export const SearchProperties: React.FC = () => {
         return;
       }
 
-      // Fetch active sectors
-      const { data: sData } = await supabase.from('sectors').select('*').eq('is_deleted', false).order('name');
+      // Fetch active sectors & types from cache
+      const { sectors: sData, propertyTypes: tData } = await getCachedReferenceData();
       if (sData) setSectors(sData);
-
-      // Fetch types
-      const { data: tData } = await supabase.from('property_types').select('*').order('sort_order');
       if (tData) setPropertyTypes(tData);
 
       // Fetch dashboard metrics
@@ -467,7 +503,7 @@ export const SearchProperties: React.FC = () => {
     setSelectedCategory('residential');
     setSelectedSubType(null);
     setShowPhone(false);
-    setShowLocation(true);
+    setShowHouseNo(false);
     setSortBy('newest');
     setCurrentPage(1);
     setProperties([]);
@@ -482,36 +518,40 @@ export const SearchProperties: React.FC = () => {
     executeSearch();
   };
 
-  // Mark property as sold (Moves to Sold Properties table)
-  const handleMarkAsSold = async (prop: Property) => {
+
+
+  // Permanently delete property (soft delete in DB)
+  const handleDeleteProperty = async (prop: Property) => {
     try {
       if (!isSupabaseConfigured) {
         const all: any[] = JSON.parse(localStorage.getItem('re_mock_properties') || '[]');
-        const updated = all.map((p) => (p.id === prop.id ? { ...p, status: 'sold' } : p));
+        const updated = all.filter((p) => p.id !== prop.id);
         localStorage.setItem('re_mock_properties', JSON.stringify(updated));
       } else {
-        const { error } = await supabase
-          .from('properties')
-          .update({ status: 'sold' })
-          .eq('id', prop.id);
-        if (error) throw error;
+        const { error } = await supabase.rpc('soft_delete_property', { p_id: prop.id });
+        if (error) {
+          const { error: directError } = await supabase
+            .from('properties')
+            .update({ is_deleted: true })
+            .eq('id', prop.id);
+          if (directError) throw directError;
+        }
       }
 
       showToast({
         type: 'success',
-        title: 'Property Sold!',
-        message: `Property ${formatPropertyId(prop.plot_id)} marked as sold and moved to Sold table.`,
+        title: 'Property Deleted',
+        message: `Property ${formatPropertyId(prop.plot_id)} removed from active inventory.`,
       });
-      setPropertyToMarkSold(null);
+      setPropertyToDelete(null);
       setProperties((prev) => prev.filter((p) => p.id !== prop.id));
       setTotalCount((c) => Math.max(0, c - 1));
-      loadSoldProperties();
       loadReferencesAndMetrics();
     } catch (err: any) {
       showToast({
         type: 'error',
-        title: 'Action Failed',
-        message: err.message || 'Could not mark property as sold',
+        title: 'Delete Failed',
+        message: err.message || 'Could not delete property',
       });
     }
   };
@@ -617,7 +657,8 @@ export const SearchProperties: React.FC = () => {
     const selectedList = properties.filter((p) => selectedIds.has(p.id));
     const message = formatPropertiesText(selectedList, {
       showOwnerPhone: showPhone,
-      showLocation: showLocation,
+      showLocation: true,
+      showHouseNo: showHouseNo,
       includeContactCta: true,
     });
     const link = buildWhatsAppLink(null, message);
@@ -634,7 +675,8 @@ export const SearchProperties: React.FC = () => {
     const selectedList = properties.filter((p) => selectedIds.has(p.id));
     const message = formatPropertiesText(selectedList, {
       showOwnerPhone: showPhone,
-      showLocation: showLocation,
+      showLocation: true,
+      showHouseNo: showHouseNo,
       includeContactCta: true,
     });
 
@@ -654,7 +696,8 @@ export const SearchProperties: React.FC = () => {
   const handleCopySingleProperty = async (p: Property) => {
     const textToCopy = formatPropertiesText([p], {
       showOwnerPhone: showPhone,
-      showLocation: showLocation,
+      showLocation: true,
+      showHouseNo: showHouseNo,
       includeContactCta: true,
     });
 
@@ -707,47 +750,30 @@ export const SearchProperties: React.FC = () => {
     }
   };
 
-  // Export Filtered Results to CSV (Respects phone toggle and uses Property ID)
-  const handleExportCsv = () => {
-    if (properties.length === 0) {
-      showToast({ type: 'warning', title: 'Empty Results', message: 'No properties found to export' });
+  // Export Filtered Results to CSV (Respects phone toggle, structured columns, and uses Property ID)
+  const handleExportCsv = (selectedOnly = false) => {
+    const listToExport = selectedOnly
+      ? properties.filter((p) => selectedIds.has(p.id))
+      : properties;
+
+    if (listToExport.length === 0) {
+      showToast({
+        type: 'warning',
+        title: 'Empty Selection',
+        message: selectedOnly ? 'Please select at least one property to export' : 'No properties found to export',
+      });
       return;
     }
 
-    const headers = [
-      'Property ID',
-      'Sector',
-      'Location',
-      'House No',
-      'Price (Rupees)',
-      'Price (Formatted)',
-      'Type',
-      'Area Size',
-      'Area Unit',
-      'Status',
-      'Details',
-      ...(showPhone ? ['Owner Name', 'Owner Phone'] : []),
-    ];
-
-    const rows = properties.map((p) => [
-      formatPropertyId(p.plot_id),
-      p.sector_name || '',
-      p.location,
-      p.house_no || '',
-      p.price,
-      formatPrice(p.price),
-      p.type_name || '',
-      p.area_size || '',
-      p.area_unit || '',
-      p.status,
-      p.details || '',
-      ...(showPhone ? [p.contact_name || '', p.phone || ''] : []),
-    ]);
-
+    const { headers, rows } = buildPropertyCsvData(listToExport, { includeContact: showPhone });
     const csvData = generateCsv(headers, rows);
-    const filename = `real_estate_properties_${new Date().toISOString().slice(0, 10)}.csv`;
+    const filename = `real_estate_properties_${selectedOnly ? 'selected_' : ''}${new Date().toISOString().slice(0, 10)}.csv`;
     downloadCsv(filename, csvData);
-    showToast({ type: 'success', title: 'Export Complete', message: `Downloaded ${properties.length} properties to CSV` });
+    showToast({
+      type: 'success',
+      title: 'Export Complete',
+      message: `Downloaded ${listToExport.length} propert${listToExport.length === 1 ? 'y' : 'ies'} to CSV`,
+    });
   };
 
   const totalPages = Math.ceil(totalCount / 20) || 1;
@@ -1217,23 +1243,23 @@ export const SearchProperties: React.FC = () => {
               </div>
             </label>
 
-            {/* Show / Hide Location & House No Checkbox */}
+            {/* Show / Hide House No Checkbox */}
             <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer select-none bg-sky-50/70 dark:bg-sky-950/30 px-3 py-2 rounded-xl border border-sky-200 dark:border-sky-900/40 text-sky-900 dark:text-sky-200 min-h-[44px]">
               <input
                 type="checkbox"
-                checked={showLocation}
-                onChange={(e) => setShowLocation(e.target.checked)}
+                checked={showHouseNo}
+                onChange={(e) => setShowHouseNo(e.target.checked)}
                 className="w-4 h-4 rounded border-sky-300 text-sky-600 focus:ring-sky-500"
               />
               <div className="flex items-center gap-1.5">
-                {showLocation ? <Eye className="w-4 h-4 text-sky-600" /> : <EyeOff className="w-4 h-4 text-slate-400" />}
-                <span>Show Location & House No</span>
+                {showHouseNo ? <Eye className="w-4 h-4 text-sky-600" /> : <EyeOff className="w-4 h-4 text-slate-400" />}
+                <span>Show House No</span>
               </div>
             </label>
 
             <button
               type="button"
-              onClick={handleExportCsv}
+              onClick={() => handleExportCsv(false)}
               className="py-2 px-3.5 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5 min-h-[44px]"
             >
               <Download className="w-3.5 h-3.5 text-brand-600" />
@@ -1353,6 +1379,17 @@ export const SearchProperties: React.FC = () => {
                   <Copy className="w-3.5 h-3.5 text-brand-600" />
                   <span>Copy Selected ({selectedIds.size})</span>
                 </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleExportCsv(true)}
+                  disabled={selectedIds.size === 0}
+                  className="py-2 px-3.5 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 disabled:opacity-40 flex items-center gap-1.5 min-h-[44px] transition-all"
+                  title="Export selected properties to CSV"
+                >
+                  <Download className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400" />
+                  <span>Export Selected ({selectedIds.size})</span>
+                </button>
               </div>
             </div>
           )}
@@ -1374,9 +1411,41 @@ export const SearchProperties: React.FC = () => {
               </button>
             </div>
           ) : isLoading ? (
-            <div className="p-12 text-center text-slate-500">
-              <div className="inline-block w-8 h-8 border-3 border-brand-600 border-t-transparent rounded-full animate-spin mb-2" />
-              <p className="text-sm">Loading properties...</p>
+            <div className="space-y-4">
+              {/* Desktop Skeleton Table */}
+              <div className="hidden md:block overflow-hidden rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-md">
+                <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/80 flex items-center justify-between">
+                  <div className="h-4 w-32 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
+                  <div className="h-4 w-24 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
+                </div>
+                <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {[...Array(5)].map((_, i) => (
+                    <div key={i} className="p-4 flex items-center justify-between gap-4 animate-pulse">
+                      <div className="h-4 w-16 bg-slate-200 dark:bg-slate-700 rounded" />
+                      <div className="h-5 w-6 bg-slate-200 dark:bg-slate-700 rounded-full" />
+                      <div className="h-4 w-24 bg-slate-200 dark:bg-slate-700 rounded" />
+                      <div className="h-4 w-28 bg-slate-200 dark:bg-slate-700 rounded" />
+                      <div className="h-4 w-20 bg-slate-200 dark:bg-slate-700 rounded" />
+                      <div className="h-4 w-20 bg-slate-200 dark:bg-slate-700 rounded font-bold" />
+                      <div className="h-4 w-16 bg-slate-200 dark:bg-slate-700 rounded" />
+                      <div className="h-8 w-24 bg-slate-200 dark:bg-slate-700 rounded-lg" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Mobile Skeleton Cards */}
+              <div className="grid grid-cols-1 gap-3 md:hidden">
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-3 animate-pulse">
+                    <div className="flex justify-between items-center">
+                      <div className="h-5 w-24 bg-slate-200 dark:bg-slate-700 rounded" />
+                      <div className="h-5 w-16 bg-slate-200 dark:bg-slate-700 rounded" />
+                    </div>
+                    <div className="h-4 w-40 bg-slate-200 dark:bg-slate-700 rounded" />
+                    <div className="h-6 w-28 bg-slate-200 dark:bg-slate-700 rounded" />
+                  </div>
+                ))}
+              </div>
             </div>
           ) : properties.length === 0 ? (
             <div className="p-12 text-center rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500">
@@ -1400,6 +1469,7 @@ export const SearchProperties: React.FC = () => {
                 {properties.map((p) => {
                   const isSelected = selectedIds.has(p.id);
                   const cleanContactPhone = p.phone ? normalizePhone(p.phone).raw : '';
+                  const isBroker = Boolean(p.is_broker || (p.details && /\[Broker\]/i.test(p.details)));
 
                   return (
                     <div
@@ -1423,9 +1493,21 @@ export const SearchProperties: React.FC = () => {
                               <Square className="w-5 h-5" />
                             )}
                           </button>
-                          <span className="font-mono font-bold text-xs px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
-                            {formatPropertyId(p.plot_id)}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono font-bold text-xs px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
+                              {formatPropertyId(p.plot_id)}
+                            </span>
+                            <span
+                              title={isBroker ? 'Entered by Broker' : 'Entered by Owner'}
+                              className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-black ${
+                                isBroker
+                                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
+                                  : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700'
+                              }`}
+                            >
+                              {isBroker ? 'B' : 'O'}
+                            </span>
+                          </div>
                         </div>
 
                         <div className="flex items-center gap-1.5">
@@ -1439,27 +1521,47 @@ export const SearchProperties: React.FC = () => {
                             <span>Copy Data</span>
                           </button>
 
-                          <button
-                            type="button"
-                            onClick={() => setPropertyToMarkSold(p)}
-                            title="Mark as Sold (Move to Sold Properties Table)"
-                            className="py-1 px-2 rounded-lg border border-rose-200 dark:border-rose-900/40 bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 hover:bg-rose-100 text-xs font-medium flex items-center gap-1 transition-colors min-h-[30px]"
-                          >
-                            <Trash2 className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
-                            <span>Sold</span>
-                          </button>
+                          {/* Action Dropdown Menu */}
+                          <div className="relative inline-block text-left action-menu-container">
+                            <button
+                              type="button"
+                              onClick={() => setActiveActionMenuId(activeActionMenuId === p.id ? null : p.id)}
+                              className="py-1 px-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-brand-500 hover:text-brand-600 text-xs font-medium flex items-center gap-1 transition-colors min-h-[30px]"
+                            >
+                              <span>Action</span>
+                              <ChevronDown className="w-3 h-3" />
+                            </button>
 
-                          <span
-                            className={`text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
-                              p.status === 'available'
-                                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                                : p.status === 'hold'
-                                ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
-                                : 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
-                            }`}
-                          >
-                            {p.status}
-                          </span>
+                            {activeActionMenuId === p.id && (
+                              <div className="absolute right-0 mt-1 w-40 rounded-xl bg-white dark:bg-slate-800 shadow-xl border border-slate-200 dark:border-slate-700 py-1 z-50 animate-in fade-in zoom-in-95 duration-100">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveActionMenuId(null);
+                                    navigate(`/add?edit=${p.id}`);
+                                  }}
+                                  className="w-full text-left px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700/60 flex items-center gap-2"
+                                >
+                                  <Pencil className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+                                  <span>Edit Record</span>
+                                </button>
+
+                                <div className="border-t border-slate-100 dark:border-slate-700 my-1" />
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveActionMenuId(null);
+                                    setPropertyToDelete(p);
+                                  }}
+                                  className="w-full text-left px-3 py-2 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+                                  <span>Delete Record</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
 
@@ -1475,20 +1577,18 @@ export const SearchProperties: React.FC = () => {
                         <p className="text-xs text-slate-600 dark:text-slate-400">
                           Sector: <span className="font-medium text-slate-900 dark:text-slate-200">{p.sector_name || 'N/A'}</span>
                         </p>
-                        {showLocation && (p.location || p.house_no) ? (
-                          <div className="text-xs text-slate-600 dark:text-slate-400 space-y-0.5">
-                            {p.location && (
-                              <p>
-                                Location: <span className="font-medium text-slate-900 dark:text-slate-200">{p.location}</span>
-                              </p>
-                            )}
-                            {p.house_no && (
-                              <p>
-                                House No: <span className="font-medium text-slate-900 dark:text-slate-200">{p.house_no}</span>
-                              </p>
-                            )}
-                          </div>
-                        ) : null}
+                        <div className="text-xs text-slate-600 dark:text-slate-400 space-y-0.5">
+                          {p.location && (
+                            <p>
+                              Location: <span className="font-medium text-slate-900 dark:text-slate-200">{p.location}</span>
+                            </p>
+                          )}
+                          {showHouseNo && p.house_no && (
+                            <p>
+                              House No: <span className="font-medium text-brand-600 dark:text-brand-400">{p.house_no}</span>
+                            </p>
+                          )}
+                        </div>
                         {p.area_size && (
                           <p className="text-xs text-slate-500">
                             Area: {p.area_size} {p.area_unit}
@@ -1505,8 +1605,8 @@ export const SearchProperties: React.FC = () => {
                       {showPhone && (
                         <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
                           <div>
-                            <span className="text-[11px] text-slate-400 block">Owner Contact</span>
-                            <span className="text-xs font-semibold">{p.contact_name || 'Owner'}</span>
+                            <span className="text-[11px] text-slate-400 block">{isBroker ? 'Broker Contact' : 'Owner Contact'}</span>
+                            <span className="text-xs font-semibold">{p.contact_name || (isBroker ? 'Broker' : 'Owner')}</span>
                             {p.phone && (
                               <div className="flex items-center gap-1.5 mt-0.5">
                                 <span className="text-[11px] font-mono text-slate-600 dark:text-slate-300 block">
@@ -1536,11 +1636,11 @@ export const SearchProperties: React.FC = () => {
                               href={`https://wa.me/91${cleanContactPhone}?text=Hello,%20inquiring%20about%20Property%20${formatPropertyId(p.plot_id)}`}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-colors min-h-[40px]"
-                              title="WhatsApp Owner"
+                              className="p-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center shadow-sm transition-colors min-h-[38px] min-w-[38px]"
+                              title={`WhatsApp ${isBroker ? 'Broker' : 'Owner'}`}
+                              aria-label={`WhatsApp ${isBroker ? 'Broker' : 'Owner'}`}
                             >
                               <MessageCircle className="w-4 h-4" />
-                              <span>WhatsApp</span>
                             </a>
                           ) : (
                             <span className="text-xs text-slate-400">No phone</span>
@@ -1555,8 +1655,8 @@ export const SearchProperties: React.FC = () => {
               {/* Desktop Table View (Visible on md+ screens) */}
               <div className="hidden md:block overflow-x-auto rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-md">
                 <table className="w-full text-left border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  <thead className="sticky top-0 z-20 bg-slate-50/95 dark:bg-slate-800/95 backdrop-blur-md">
+                    <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-semibold uppercase tracking-wider text-slate-500">
                       <th className="py-3 px-4 w-12">
                         <button
                           type="button"
@@ -1571,12 +1671,12 @@ export const SearchProperties: React.FC = () => {
                         </button>
                       </th>
                       <th className="py-3 px-4">Property ID</th>
+                      <th className="py-3 px-4 text-center">O / B</th>
                       <th className="py-3 px-4">Sector</th>
                       <th className="py-3 px-4">Location / No</th>
                       <th className="py-3 px-4">Type</th>
                       <th className="py-3 px-4">Price</th>
                       <th className="py-3 px-4">Area</th>
-                      <th className="py-3 px-4">Status</th>
                       {showPhone && <th className="py-3 px-4">Owner Phone</th>}
                       <th className="py-3 px-4 text-right">Actions</th>
                     </tr>
@@ -1585,6 +1685,7 @@ export const SearchProperties: React.FC = () => {
                     {properties.map((p) => {
                       const isSelected = selectedIds.has(p.id);
                       const cleanPhone = p.phone ? normalizePhone(p.phone).raw : '';
+                      const isBroker = Boolean(p.is_broker || (p.details && /\[Broker\]/i.test(p.details)));
 
                       return (
                         <tr
@@ -1609,16 +1710,22 @@ export const SearchProperties: React.FC = () => {
                           <td className="py-3 px-4 font-mono font-bold text-xs text-brand-700 dark:text-brand-300">
                             {formatPropertyId(p.plot_id)}
                           </td>
+                          <td className="py-3 px-4 text-center">
+                            <span
+                              title={isBroker ? 'Entered by Broker' : 'Entered by Owner'}
+                              className={`inline-flex items-center justify-center w-6 h-6 rounded-full font-bold text-xs ${
+                                isBroker
+                                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
+                                  : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700'
+                              }`}
+                            >
+                              {isBroker ? 'B' : 'O'}
+                            </span>
+                          </td>
                           <td className="py-3 px-4 font-medium">{p.sector_name || 'N/A'}</td>
                           <td className="py-3 px-4">
-                            {showLocation ? (
-                              <>
-                                <div className="font-medium text-slate-900 dark:text-white">{p.location || '—'}</div>
-                                {p.house_no && <div className="text-xs text-slate-400">House: {p.house_no}</div>}
-                              </>
-                            ) : (
-                              <span className="text-xs text-slate-400 italic">Hidden</span>
-                            )}
+                            <div className="font-medium text-slate-900 dark:text-white">{p.location || '—'}</div>
+                            {showHouseNo && p.house_no && <div className="text-xs text-brand-600 dark:text-brand-400">House: {p.house_no}</div>}
                           </td>
                           <td className="py-3 px-4">{p.type_name || 'Property'}</td>
                           <td className="py-3 px-4 font-bold text-slate-900 dark:text-white">
@@ -1626,19 +1733,6 @@ export const SearchProperties: React.FC = () => {
                           </td>
                           <td className="py-3 px-4 text-xs text-slate-500">
                             {p.area_size ? `${p.area_size} ${p.area_unit}` : '-'}
-                          </td>
-                          <td className="py-3 px-4">
-                            <span
-                              className={`capitalize px-2 py-0.5 rounded text-xs font-semibold ${
-                                p.status === 'available'
-                                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                                  : p.status === 'hold'
-                                  ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
-                                  : 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
-                              }`}
-                            >
-                              {p.status}
-                            </span>
                           </td>
                           {showPhone && (
                             <td className="py-3 px-4">
@@ -1665,11 +1759,11 @@ export const SearchProperties: React.FC = () => {
                                     href={`https://wa.me/91${cleanPhone}?text=Hello,%20inquiring%20about%20Property%20${formatPropertyId(p.plot_id)}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    title="WhatsApp Owner"
-                                    className="py-1 px-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-xs font-medium flex items-center gap-1 min-h-[36px] transition-colors"
+                                    title={`WhatsApp ${isBroker ? 'Broker' : 'Owner'}`}
+                                    aria-label={`WhatsApp ${isBroker ? 'Broker' : 'Owner'}`}
+                                    className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 flex items-center justify-center min-h-[32px] min-w-[32px] transition-colors"
                                   >
-                                    <MessageCircle className="w-3.5 h-3.5" />
-                                    <span>WhatsApp</span>
+                                    <MessageCircle className="w-4 h-4" />
                                   </a>
                                 </div>
                               ) : (
@@ -1688,15 +1782,48 @@ export const SearchProperties: React.FC = () => {
                                 <Copy className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
                                 <span>Copy Data</span>
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => setPropertyToMarkSold(p)}
-                                title="Mark as Sold (Move to Sold Properties Table)"
-                                className="inline-flex items-center gap-1.5 py-1 px-2.5 rounded-lg border border-rose-200 dark:border-rose-900/40 bg-rose-50/70 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-900/50 text-rose-700 dark:text-rose-300 text-xs font-semibold transition-colors min-h-[34px]"
-                              >
-                                <Trash2 className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
-                                <span>Sold</span>
-                              </button>
+
+                              {/* Action Dropdown Menu */}
+                              <div className="relative inline-block text-left action-menu-container">
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveActionMenuId(activeActionMenuId === p.id ? null : p.id)}
+                                  className="inline-flex items-center gap-1 py-1 px-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-brand-500 hover:text-brand-600 dark:hover:text-brand-400 text-xs font-semibold transition-colors min-h-[34px]"
+                                >
+                                  <span>Action</span>
+                                  <ChevronDown className="w-3.5 h-3.5" />
+                                </button>
+
+                                {activeActionMenuId === p.id && (
+                                  <div className="absolute right-0 mt-1 w-40 rounded-xl bg-white dark:bg-slate-800 shadow-xl border border-slate-200 dark:border-slate-700 py-1 z-50 animate-in fade-in zoom-in-95 duration-100 text-left">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setActiveActionMenuId(null);
+                                        navigate(`/add?edit=${p.id}`);
+                                      }}
+                                      className="w-full text-left px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700/60 flex items-center gap-2"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+                                      <span>Edit Record</span>
+                                    </button>
+
+                                    <div className="border-t border-slate-100 dark:border-slate-700 my-1" />
+
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setActiveActionMenuId(null);
+                                        setPropertyToDelete(p);
+                                      }}
+                                      className="w-full text-left px-3 py-2 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+                                      <span>Delete Record</span>
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </td>
                         </tr>
@@ -1782,20 +1909,16 @@ export const SearchProperties: React.FC = () => {
                       <p className="text-xs text-slate-600 dark:text-slate-400">
                         Sector: <span className="font-medium text-slate-900 dark:text-slate-200">{p.sector_name || 'N/A'}</span>
                       </p>
-                      {showLocation && (p.location || p.house_no) ? (
-                        <div className="text-xs text-slate-600 dark:text-slate-400 space-y-0.5">
-                          {p.location && (
-                            <p>
-                              Location: <span className="font-medium text-slate-900 dark:text-slate-200">{p.location}</span>
-                            </p>
-                          )}
-                          {p.house_no && (
-                            <p>
-                              House No: <span className="font-medium text-slate-900 dark:text-slate-200">{p.house_no}</span>
-                            </p>
-                          )}
-                        </div>
-                      ) : null}
+                      {p.location && (
+                        <p className="text-xs text-slate-600 dark:text-slate-400">
+                          Location: <span className="font-medium text-slate-900 dark:text-slate-200">{p.location}</span>
+                        </p>
+                      )}
+                      {showHouseNo && p.house_no && (
+                        <p className="text-xs text-slate-600 dark:text-slate-400">
+                          House No: <span className="font-medium text-slate-900 dark:text-slate-200">{p.house_no}</span>
+                        </p>
+                      )}
                     </div>
                     <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
                       <button
@@ -1823,8 +1946,8 @@ export const SearchProperties: React.FC = () => {
               {/* Desktop Sold Table */}
               <div className="hidden md:block overflow-x-auto rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-md">
                 <table className="w-full text-left border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  <thead className="sticky top-0 z-20 bg-slate-50/95 dark:bg-slate-800/95 backdrop-blur-md">
+                    <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-semibold uppercase tracking-wider text-slate-500">
                       <th className="py-3 px-4">Property ID</th>
                       <th className="py-3 px-4">Sector</th>
                       <th className="py-3 px-4">Location / No</th>
@@ -1843,14 +1966,8 @@ export const SearchProperties: React.FC = () => {
                         </td>
                         <td className="py-3 px-4 font-medium">{p.sector_name || 'N/A'}</td>
                         <td className="py-3 px-4">
-                          {showLocation ? (
-                            <>
-                              <div className="font-medium text-slate-900 dark:text-white">{p.location || '—'}</div>
-                              {p.house_no && <div className="text-xs text-slate-400">House: {p.house_no}</div>}
-                            </>
-                          ) : (
-                            <span className="text-xs text-slate-400 italic">Hidden</span>
-                          )}
+                          <div className="font-medium text-slate-900 dark:text-white">{p.location || '—'}</div>
+                          {showHouseNo && p.house_no && <div className="text-xs text-brand-600 dark:text-brand-400">House: {p.house_no}</div>}
                         </td>
                         <td className="py-3 px-4">{p.type_name || 'Property'}</td>
                         <td className="py-3 px-4 font-bold text-slate-600 dark:text-slate-400">
@@ -1896,8 +2013,10 @@ export const SearchProperties: React.FC = () => {
         </div>
       )}
 
-      {/* Mark Property as Sold Confirmation Modal */}
-      {propertyToMarkSold && (
+
+
+      {/* Delete Property Confirmation Modal */}
+      {propertyToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
           <div className="w-full max-w-md p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4">
             <div className="flex items-center gap-3">
@@ -1906,33 +2025,33 @@ export const SearchProperties: React.FC = () => {
               </div>
               <div>
                 <h3 className="font-bold text-slate-900 dark:text-white text-base">
-                  Mark Property as Sold?
+                  Delete Property Record?
                 </h3>
                 <p className="text-xs text-slate-500">
-                  {formatPropertyId(propertyToMarkSold.plot_id)} &bull; {propertyToMarkSold.sector_name || 'N/A'}
+                  {formatPropertyId(propertyToDelete.plot_id)} &bull; {propertyToDelete.sector_name || 'N/A'}
                 </p>
               </div>
             </div>
 
             <p className="text-sm text-slate-600 dark:text-slate-300">
-              Are you sure this property is sold? It will be removed from active search results and moved to the <strong>Sold Properties Table</strong>.
+              Are you sure you want to permanently delete Property <strong>{formatPropertyId(propertyToDelete.plot_id)}</strong>? It will be removed from your inventory and won&apos;t appear in search records.
             </p>
 
             <div className="flex items-center justify-end gap-3 pt-2">
               <button
                 type="button"
-                onClick={() => setPropertyToMarkSold(null)}
+                onClick={() => setPropertyToDelete(null)}
                 className="py-2 px-4 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 min-h-[40px]"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                onClick={() => handleMarkAsSold(propertyToMarkSold)}
+                onClick={() => handleDeleteProperty(propertyToDelete)}
                 className="py-2 px-4 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white min-h-[40px] shadow-sm flex items-center gap-1.5"
               >
                 <Trash2 className="w-4 h-4" />
-                <span>Confirm Sold</span>
+                <span>Confirm Delete</span>
               </button>
             </div>
           </div>

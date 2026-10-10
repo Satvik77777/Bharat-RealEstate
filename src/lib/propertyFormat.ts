@@ -36,6 +36,18 @@ export function formatPropertyId(plotId: string | null | undefined): string {
   return trimmed.startsWith('JSK-') ? trimmed : `JSK-${trimmed}`;
 }
 
+/**
+ * Converts legacy/compact dimension strings like "Dim: 30x60 ft" or "30*60" into "Length: 30 ft, Breadth: 60 ft".
+ */
+export function formatDimensions(text: string): string {
+  if (!text) return '';
+  return text
+    // Handles [Dim: 30x60 ft] or Dim: 30x60 ft or Dim: 30*60
+    .replace(/\[?Dim:\s*(\d+(?:\.\d+)?)\s*[x*×]\s*(\d+(?:\.\d+)?)\s*(?:ft)?\]?/gi, 'Length: $1 ft, Breadth: $2 ft')
+    // Handles Dimensions: 30x60 or 30*60
+    .replace(/Dimensions?:\s*(\d+(?:\.\d+)?)\s*[x*×]\s*(\d+(?:\.\d+)?)\s*(?:ft)?/gi, 'Length: $1 ft, Breadth: $2 ft');
+}
+
 export interface PropertyDataToCopy {
   plot_id: string;
   price: number;
@@ -49,55 +61,73 @@ export interface PropertyDataToCopy {
   details?: string | null;
   contact_name?: string | null;
   phone?: string | null;
+  is_broker?: boolean;
 }
 
 export interface PropertyCopyOptions {
   showOwnerPhone?: boolean;
   showLocation?: boolean;
+  showHouseNo?: boolean;
   includeContactCta?: boolean;
   contactCtaText?: string;
 }
 
 /**
- * Formats a single property item block with Property ID, Price (with asking (negotiable)), Type, Location, etc.
+ * Formats a single property item block:
+ * - Labels *Property ID:*, *Details:*, *Owner:* (or *Broker:*), *Contact:* are bold with asterisks (*Label:*)
+ * - Values are not bold
+ * - Status is excluded
+ * - Location is shown, House No only if showHouseNo is true
+ * - Dimensions are formatted as "Length: <L> ft, Breadth: <B> ft"
  */
 export function formatSinglePropertyItem(
   p: PropertyDataToCopy,
-  options: { showOwnerPhone?: boolean; showLocation?: boolean } = {}
+  options: { showOwnerPhone?: boolean; showLocation?: boolean; showHouseNo?: boolean } = {}
 ): string {
   const propId = formatPropertyId(p.plot_id);
   const priceStr = formatPrice(p.price);
   const typeStr = p.type_name || 'Property';
-  const statusStr = (p.status || 'AVAILABLE').toUpperCase();
+
+  const isBroker = Boolean(p.is_broker || (p.details && /\[Broker\]/i.test(p.details)));
 
   const lines: string[] = [
-    `Property ID: ${propId}`,
+    `*Property ID:* ${propId}`,
     `Price: ${priceStr} asking (negotiable)`,
     `Type: ${typeStr}`,
   ];
 
-  // Only include location and house no if showLocation is not explicitly false
-  if (options.showLocation !== false) {
-    if (p.location) {
-      lines.push(`Location: ${p.location}`);
-    }
-    if (p.house_no) {
-      lines.push(`House No: ${p.house_no}`);
-    }
+  // Location is shown by default unless explicitly disabled
+  if (options.showLocation !== false && p.location) {
+    lines.push(`Location: ${p.location}`);
   }
+
+  // House No is only shown if showHouseNo is true (or legacy showLocation is true)
+  const shouldShowHouseNo = options.showHouseNo ?? options.showLocation ?? false;
+  if (shouldShowHouseNo && p.house_no) {
+    lines.push(`House No: ${p.house_no}`);
+  }
+
   if (p.sector_name && p.sector_name !== p.location) {
     lines.push(`Sector: ${p.sector_name}`);
   }
+
   if (p.area_size) {
     lines.push(`Area: ${p.area_size} ${p.area_unit || ''}`.trim());
   }
-  lines.push(`Status: ${statusStr}`);
+
+  // Details: clean up [Broker] tag and format dimensions to Length: ... ft, Breadth: ... ft
   if (p.details) {
-    lines.push(`Details: ${p.details}`);
+    let cleanDetails = p.details.replace(/\[Broker\]\s*/gi, '').trim();
+    cleanDetails = formatDimensions(cleanDetails);
+    if (cleanDetails) {
+      lines.push(`*Details:* ${cleanDetails}`);
+    }
   }
+
   if (options.showOwnerPhone && p.phone) {
-    lines.push(`Owner: ${p.contact_name || 'Owner'}`);
-    lines.push(`Contact: ${normalizePhone(p.phone).formatted || p.phone}`);
+    const contactRole = isBroker ? 'Broker' : 'Owner';
+    lines.push(`*${contactRole}:* ${p.contact_name || contactRole}`);
+    lines.push(`*Contact:* ${normalizePhone(p.phone).formatted || p.phone}`);
   }
 
   return lines.join('\n');
@@ -117,6 +147,7 @@ export function formatPropertiesText(
     formatSinglePropertyItem(p, {
       showOwnerPhone: options.showOwnerPhone,
       showLocation: options.showLocation,
+      showHouseNo: options.showHouseNo,
     })
   );
 

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Building,
   Building2,
@@ -16,6 +17,7 @@ import { useToast } from '../context/ToastContext';
 import { parsePriceInput, getPricePreview, type PriceUnit } from '../lib/price';
 import { normalizePhone } from '../lib/phone';
 import { formatPropertyId } from '../lib/propertyFormat';
+import { getCachedReferenceData, invalidateReferenceCache } from '../lib/referenceCache';
 import type { Sector, PropertyType, PropertyStatus, AreaUnit, DuplicatePhoneMatch } from '../types/database';
 
 export type PropertyCategory = 'residential' | 'commercial';
@@ -322,54 +324,102 @@ export const AddProperty: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // Search params for edit support
+  const [searchParams, setSearchParams] = useSearchParams();
+
   // Editing state
   const [editingPropertyId, setEditingPropertyId] = useState<string | null>(null);
 
-  // Fetch reference lists (sectors & property types)
-  const loadData = async () => {
+  // Broker flag (Owner vs Broker)
+  const [isBroker, setIsBroker] = useState(false);
+
+  const populateFormForEdit = (data: any) => {
+    setEditingPropertyId(data.id);
+    setSectorInput(data.sector_name || '');
+    setLocation(data.location || '');
+    setHouseNo(data.house_no || '');
+    setSelectedTypeId(data.type_id || '');
+    setStatus(data.status || 'available');
+    setOwnerPhone(data.phone || data._mockPhone || '');
+    setOwnerName(data.contact_name || data._mockContactName || '');
+
+    // Broker flag check
+    const broker = Boolean(data.is_broker || (data.details && /\[Broker\]/i.test(data.details)));
+    setIsBroker(broker);
+
+    // Parse price to unit
+    if (data.price) {
+      if (data.price >= 10000000) {
+        setPriceValue(String(data.price / 10000000));
+        setPriceUnit('Cr');
+      } else {
+        setPriceValue(String(data.price / 100000));
+        setPriceUnit('Lakh');
+      }
+    }
+
+    if (data.area_size) {
+      setAreaSize(String(data.area_size));
+    }
+    if (data.area_unit) {
+      setAreaUnit(data.area_unit as AreaUnit);
+    }
+
+    // Extract length/breadth if present in details
+    const rawDetails = data.details || '';
+    const dimMatch = rawDetails.match(/(?:Length:\s*(\d+(?:\.\d+)?)\s*ft,\s*Breadth:\s*(\d+(?:\.\d+)?)\s*ft)|(?:Dim:\s*(\d+(?:\.\d+)?)\s*[x*×]\s*(\d+(?:\.\d+)?))/i);
+    if (dimMatch) {
+      const l = dimMatch[1] || dimMatch[3];
+      const b = dimMatch[2] || dimMatch[4];
+      setLengthFt(l);
+      setBreadthFt(b);
+    }
+
+    // Clean details for notes textarea
+    const cleaned = rawDetails
+      .replace(/\[Broker\]\s*/gi, '')
+      .replace(/\[?Length:\s*[\d.]+\s*ft,\s*Breadth:\s*[\d.]+\s*ft(?:\s*\|\s*)?/gi, '')
+      .replace(/\[?Dim:\s*[\d.]+\s*[x*×]\s*[\d.]+(?:\s*ft)?(?:\s*\|\s*)?/gi, '')
+      .replace(/Rate:\s*₹[\d,]+\/(?:gaj|sqft|acre)(?:\s*\|\s*)?/gi, '')
+      .replace(/[[\]]/g, '')
+      .trim();
+    setDetails(cleaned);
+  };
+
+  const loadPropertyForEdit = async (propId: string) => {
     try {
       if (!isSupabaseConfigured) {
-        // Fallback mock data when Supabase is not yet connected
-        const mockSectors: Sector[] = [
-          { id: 'sec-1', name: 'Sector 14', created_at: '', updated_at: '', is_deleted: false },
-          { id: 'sec-2', name: 'Sector 15', created_at: '', updated_at: '', is_deleted: false },
-          { id: 'sec-3', name: 'Golf Course Road', created_at: '', updated_at: '', is_deleted: false },
-          { id: 'sec-4', name: 'DLF Phase 1', created_at: '', updated_at: '', is_deleted: false },
-        ];
-        const mockTypes: PropertyType[] = [
-          { id: 'type-1', name: 'Plot', sort_order: 1 },
-          { id: 'type-2', name: 'Commercial', sort_order: 2 },
-          { id: 'type-3', name: 'Residential (House/Kothi)', sort_order: 3 },
-          { id: 'type-4', name: 'Agricultural Land', sort_order: 4 },
-          { id: 'type-5', name: 'Flat/Apartment', sort_order: 5 },
-          { id: 'type-6', name: 'Industrial', sort_order: 6 },
-          { id: 'type-7', name: 'Farmhouse', sort_order: 7 },
-        ];
-        setSectors(mockSectors);
-        setPropertyTypes(mockTypes);
-        setSelectedTypeId(mockTypes[0].id);
+        const all: any[] = JSON.parse(localStorage.getItem('re_mock_properties') || '[]');
+        const found = all.find((p: any) => p.id === propId);
+        if (found) {
+          populateFormForEdit(found);
+        }
         return;
       }
 
-      // Fetch sectors
-      const { data: secData } = await supabase
-        .from('sectors')
-        .select('*')
-        .eq('is_deleted', false)
-        .order('name');
-      if (secData) setSectors(secData);
+      const { data, error } = await supabase.rpc('get_property_for_edit', { p_id: propId });
+      if (error) throw error;
+      if (data && data[0]) {
+        populateFormForEdit(data[0]);
+      }
+    } catch (err: any) {
+      showToast({
+        type: 'error',
+        title: 'Edit Load Failed',
+        message: err.message || 'Could not load property details for editing',
+      });
+    }
+  };
 
-      // Fetch property types
-      const { data: typeData } = await supabase
-        .from('property_types')
-        .select('*')
-        .order('sort_order');
-      if (typeData) {
-        setPropertyTypes(typeData);
-        if (typeData.length > 0 && !selectedTypeId) {
-          const defaultPlot = typeData.find((t) => t.name.toLowerCase().includes('plot')) || typeData[0];
-          setSelectedTypeId(defaultPlot.id);
-        }
+  // Fetch reference lists (sectors & property types)
+  const loadData = async (forceRefresh = false) => {
+    try {
+      const { sectors: secData, propertyTypes: typeData } = await getCachedReferenceData(forceRefresh);
+      setSectors(secData);
+      setPropertyTypes(typeData);
+      if (typeData.length > 0 && !selectedTypeId) {
+        const defaultPlot = typeData.find((t) => t.name.toLowerCase().includes('plot')) || typeData[0];
+        setSelectedTypeId(defaultPlot.id);
       }
     } catch {
       showToast({ type: 'error', title: 'Network Error', message: 'Failed to load reference data' });
@@ -379,6 +429,14 @@ export const AddProperty: React.FC = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  // Listen to URL edit param
+  useEffect(() => {
+    const editId = searchParams.get('edit');
+    if (editId) {
+      loadPropertyForEdit(editId);
+    }
+  }, [searchParams]);
 
   // Check duplicate phone via phone_exists() RPC
   useEffect(() => {
@@ -436,6 +494,7 @@ export const AddProperty: React.FC = () => {
     setAreaUnit('sq yard');
     setOwnerName('');
     setOwnerPhone('');
+    setIsBroker(false);
     setDetails('');
     setStatus('available');
     setLengthFt('');
@@ -445,6 +504,7 @@ export const AddProperty: React.FC = () => {
     setDuplicateMatches([]);
     setErrors({});
     setEditingPropertyId(null);
+    setSearchParams({});
   };
 
   // Validate form
@@ -517,21 +577,25 @@ export const AddProperty: React.FC = () => {
             throw new Error(`Failed to create sector: ${secError.message}`);
           }
           finalSectorId = newSecData.id;
-          await loadData();
+          invalidateReferenceCache();
+          await loadData(true);
         }
       }
 
       const parsedPrice = parsePriceInput(priceValue, priceUnit)!;
       const cleanPhone = normalizePhone(ownerPhone).raw;
 
-      // Build metadata prefix for dimensions and rate if entered
+      // Build metadata prefix for dimensions, rate, and broker if entered
       const metaParts: string[] = [];
       if (lengthFt.trim() && breadthFt.trim()) {
-        metaParts.push(`Dim: ${lengthFt.trim()}x${breadthFt.trim()} ft`);
+        metaParts.push(`Length: ${lengthFt.trim()} ft, Breadth: ${breadthFt.trim()} ft`);
       }
       if (rateValue.trim()) {
         const rateLabel = rateUnit === 'per_gaj' ? 'gaj' : rateUnit === 'per_sqft' ? 'sqft' : 'acre';
         metaParts.push(`Rate: ₹${Number(rateValue.trim()).toLocaleString('en-IN')}/${rateLabel}`);
+      }
+      if (isBroker) {
+        metaParts.push('[Broker]');
       }
       const metaPrefix = metaParts.length > 0 ? `[${metaParts.join(' | ')}]` : '';
       const finalDetails = metaPrefix
@@ -603,6 +667,7 @@ export const AddProperty: React.FC = () => {
                   area_unit: areaUnit,
                   details: finalDetails,
                   status,
+                  is_broker: isBroker,
                   _mockContactName: ownerName.trim() || null,
                   _mockPhone: cleanPhone,
                 }
@@ -611,7 +676,9 @@ export const AddProperty: React.FC = () => {
           localStorage.setItem('re_mock_properties', JSON.stringify(updated));
           showToast({ type: 'success', title: 'Property Updated', message: 'Details updated successfully' });
         } else {
-          const nextPlotNo = savedList.length + 1;
+          // Strictly sequential and unique plot number
+          const maxPlotNo = savedList.reduce((max: number, p: any) => Math.max(max, Number(p.plot_no) || 0), 0);
+          const nextPlotNo = maxPlotNo + 1;
           const newPlotId = `JSK-${String(nextPlotNo).padStart(4, '0')}`;
           const newProp = {
             id: 'mock-prop-' + Date.now(),
@@ -628,6 +695,7 @@ export const AddProperty: React.FC = () => {
             area_unit: areaUnit,
             details: finalDetails,
             status,
+            is_broker: isBroker,
             created_at: new Date().toISOString(),
             _mockContactName: ownerName.trim() || null,
             _mockPhone: cleanPhone,
@@ -648,7 +716,7 @@ export const AddProperty: React.FC = () => {
 
       // Live Supabase RPC call
       if (editingPropertyId) {
-        const { error: updateError } = await supabase.rpc('update_property', {
+        const updateParams: any = {
           p_id: editingPropertyId,
           p_sector_id: finalSectorId,
           p_location: location.trim(),
@@ -661,9 +729,18 @@ export const AddProperty: React.FC = () => {
           p_status: status,
           p_contact_name: ownerName.trim() || null,
           p_phone: cleanPhone,
-        });
+          p_is_broker: isBroker,
+        };
 
-        if (updateError) throw updateError;
+        let { error: updateError } = await supabase.rpc('update_property', updateParams);
+        if (updateError && (updateError.message?.includes('function') || updateError.code === 'PGRST202')) {
+          delete updateParams.p_is_broker;
+          const retry = await supabase.rpc('update_property', updateParams);
+          if (retry.error) throw retry.error;
+          await supabase.from('properties').update({ is_broker: isBroker }).eq('id', editingPropertyId).then();
+        } else if (updateError) {
+          throw updateError;
+        }
 
         showToast({
           type: 'success',
@@ -671,7 +748,7 @@ export const AddProperty: React.FC = () => {
           message: 'Property details and contact updated successfully.',
         });
       } else {
-        const { data, error: createError } = await supabase.rpc('create_property', {
+        const createParams: any = {
           p_sector_id: finalSectorId,
           p_location: location.trim(),
           p_house_no: houseNo.trim() || null,
@@ -683,9 +760,21 @@ export const AddProperty: React.FC = () => {
           p_status: status,
           p_contact_name: ownerName.trim() || null,
           p_phone: cleanPhone,
-        });
+          p_is_broker: isBroker,
+        };
 
-        if (createError) throw createError;
+        let { data, error: createError } = await supabase.rpc('create_property', createParams);
+        if (createError && (createError.message?.includes('function') || createError.code === 'PGRST202')) {
+          delete createParams.p_is_broker;
+          const retry = await supabase.rpc('create_property', createParams);
+          if (retry.error) throw retry.error;
+          data = retry.data;
+          if (data?.[0]?.id) {
+            await supabase.from('properties').update({ is_broker: isBroker }).eq('id', data[0].id).then();
+          }
+        } else if (createError) {
+          throw createError;
+        }
 
         const rawPlotId = data?.[0]?.plot_id || 'JSK-0000';
         const assignedId = formatPropertyId(rawPlotId);
@@ -898,7 +987,7 @@ export const AddProperty: React.FC = () => {
                 </label>
                 {lengthFt && breadthFt ? (
                   <span className="text-[11px] font-semibold text-brand-600 dark:text-brand-400 font-mono">
-                    {lengthFt}×{breadthFt} ft ({Number(lengthFt) * Number(breadthFt)} sq ft)
+                    Length: {lengthFt} ft, Breadth: {breadthFt} ft ({Number(lengthFt) * Number(breadthFt)} sq ft)
                   </span>
                 ) : (
                   <span className="text-[11px] text-slate-400">Optional</span>
@@ -1162,13 +1251,24 @@ export const AddProperty: React.FC = () => {
             {errors.price && <p className="text-xs text-rose-500 mt-1">{errors.price}</p>}
           </div>
 
-          {/* Line 6: Owner Phone (Left) & Owner Name (Right) */}
-          <div className="p-3.5 rounded-2xl bg-amber-50/40 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-900/40 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-300">
-                Owner Contact Details (Confidential)
-              </span>
-              <span className="text-[11px] text-amber-700 dark:text-amber-400">
+          {/* Line 6: Contact Details (Owner vs Broker) */}
+          <div className="p-3.5 rounded-2xl bg-amber-50/40 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-900/40 space-y-2.5">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                  {isBroker ? 'Broker Contact Details (Confidential)' : 'Owner Contact Details (Confidential)'}
+                </span>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-300 bg-white/90 dark:bg-slate-900/90 px-2.5 py-1 rounded-lg border border-amber-300 dark:border-amber-800 shadow-xs select-none">
+                  <input
+                    type="checkbox"
+                    checked={isBroker}
+                    onChange={(e) => setIsBroker(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded border-amber-400 text-brand-600 focus:ring-brand-500"
+                  />
+                  <span>Broker</span>
+                </label>
+              </div>
+              <span className="text-[11px] text-amber-700 dark:text-amber-400 font-medium">
                 Protected
               </span>
             </div>
@@ -1177,7 +1277,7 @@ export const AddProperty: React.FC = () => {
               {/* Left: Phone No Field */}
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
-                  Owner Mobile Number <span className="text-rose-500">*</span>
+                  {isBroker ? 'Broker Mobile Number' : 'Owner Mobile Number'} <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="tel"
@@ -1198,7 +1298,7 @@ export const AddProperty: React.FC = () => {
               {/* Right: Optional Name Field */}
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
-                  Owner / Seller Name <span className="text-slate-400 font-normal">(Optional)</span>
+                  {isBroker ? 'Broker / Agent Name' : 'Owner / Seller Name'} <span className="text-slate-400 font-normal">(Optional)</span>
                 </label>
                 <input
                   type="text"

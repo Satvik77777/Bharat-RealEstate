@@ -15,9 +15,8 @@ import {
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { generateCsv, downloadCsv } from '../lib/csv';
+import { generateCsv, downloadCsv, buildPropertyCsvData } from '../lib/csv';
 import { formatPrice } from '../lib/price';
-import { formatPropertyId } from '../lib/propertyFormat';
 import type { Sector, PropertyType } from '../types/database';
 
 export const Settings: React.FC = () => {
@@ -242,18 +241,7 @@ export const Settings: React.FC = () => {
         const mockBuyers = JSON.parse(localStorage.getItem('re_mock_buyers') || '[]');
 
         // Generate properties CSV
-        const propHeaders = ['Property ID', 'Sector', 'Location', 'Price (Rs)', 'Type', 'Area', 'Status', 'Owner Name', 'Owner Phone'];
-        const propRows = mockProps.map((p: any) => [
-          formatPropertyId(p.plot_id),
-          p.sector_name,
-          p.location,
-          p.price,
-          p.type_name,
-          `${p.area_size || ''} ${p.area_unit || ''}`.trim(),
-          p.status,
-          p._mockContactName || '',
-          p._mockPhone || '',
-        ]);
+        const { headers: propHeaders, rows: propRows } = buildPropertyCsvData(mockProps, { includeContact: true });
         const propCsv = generateCsv(propHeaders, propRows);
         downloadCsv(`admin_export_properties_${Date.now()}.csv`, propCsv);
 
@@ -282,38 +270,7 @@ export const Settings: React.FC = () => {
       if (data) {
         // 1. Export Properties with Owner Phones
         if (data.properties && Array.isArray(data.properties)) {
-          const headers = [
-            'Property ID',
-            'Sector',
-            'Location',
-            'House No',
-            'Price (Rupees)',
-            'Price (Formatted)',
-            'Type',
-            'Area Size',
-            'Area Unit',
-            'Details',
-            'Status',
-            'Owner Name',
-            'Owner Phone',
-            'Is Deleted',
-          ];
-          const rows = data.properties.map((p: any) => [
-            formatPropertyId(p.plot_id),
-            p.sector || '',
-            p.location || '',
-            p.house_no || '',
-            p.price,
-            formatPrice(p.price),
-            p.property_type || '',
-            p.area_size || '',
-            p.area_unit || '',
-            p.details || '',
-            p.status,
-            p.owner_name || '',
-            p.owner_phone || '',
-            p.is_deleted ? 'Yes' : 'No',
-          ]);
+          const { headers, rows } = buildPropertyCsvData(data.properties, { includeContact: true });
           downloadCsv(`admin_export_all_properties_${Date.now()}.csv`, generateCsv(headers, rows));
         }
 

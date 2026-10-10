@@ -122,23 +122,58 @@ export function formatPrice(rupees: number | bigint | null | undefined): string 
   return `₹${Number(amt).toLocaleString('en-IN')}`;
 }
 
+const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+const TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+function convertTwoDigits(num: number): string {
+  if (num < 20) return ONES[num];
+  const t = Math.floor(num / 10);
+  const o = num % 10;
+  return o === 0 ? TENS[t] : `${TENS[t]}-${ONES[o]}`;
+}
+
+/**
+ * Converts integer rupees to Indian currency words, e.g.:
+ * 27500000 -> "Two Crore Seventy-Five Lakh Rupees"
+ */
+export function priceInWords(rupees: number | bigint | null | undefined): string {
+  if (!rupees || Number(rupees) <= 0) return '';
+  const num = Math.floor(Number(rupees));
+
+  const crores = Math.floor(num / 10000000);
+  const remCrores = num % 10000000;
+  const lakhs = Math.floor(remCrores / 100000);
+  const remLakhs = remCrores % 100000;
+  const thousands = Math.floor(remLakhs / 1000);
+  const remThousands = remLakhs % 1000;
+  const hundreds = Math.floor(remThousands / 100);
+  const remHundreds = remThousands % 100;
+
+  const parts: string[] = [];
+  if (crores > 0) parts.push(`${crores < 100 ? convertTwoDigits(crores) : crores} Crore`);
+  if (lakhs > 0) parts.push(`${convertTwoDigits(lakhs)} Lakh`);
+  if (thousands > 0) parts.push(`${convertTwoDigits(thousands)} Thousand`);
+  if (hundreds > 0) parts.push(`${ONES[hundreds]} Hundred`);
+  if (remHundreds > 0) parts.push(convertTwoDigits(remHundreds));
+
+  return parts.length > 0 ? `${parts.join(' ')} Rupees` : '';
+}
+
 /**
  * Provides a live helper description for inputs, e.g.:
- * "0.5 Cr = ₹50,00,000 (50 Lakh)"
+ * "₹2,75,00,000 (Two Crore Seventy-Five Lakh Rupees)"
  */
 export function getPricePreview(value: string | number, unit: PriceUnit): string {
   const parsed = parsePriceInput(value, unit);
   if (!parsed) return '';
 
   const inRupeesFormatted = `₹${parsed.toLocaleString('en-IN')}`;
-  const shortFormatted = formatPrice(parsed);
+  const words = priceInWords(parsed);
 
-  if (unit === 'Cr') {
-    const inLakhs = parsed / 100000;
-    return `${value} Cr = ${inRupeesFormatted} (${inLakhs} Lakh)`;
-  } else if (unit === 'Lakh') {
-    return `${value} Lakh = ${inRupeesFormatted} (${shortFormatted})`;
+  if (words) {
+    return `${inRupeesFormatted} • ${words}`;
   }
 
   return inRupeesFormatted;
 }
+

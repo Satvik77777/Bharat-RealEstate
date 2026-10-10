@@ -22,7 +22,7 @@ export interface PropertyType {
   sort_order: number;
 }
 
-export type PropertyStatus = 'available' | 'sold' | 'hold';
+export type PropertyStatus = 'available' | 'sold' | 'hold' | 'not_interested';
 
 export type AreaUnit = 'gaj' | 'sq yard' | 'marla' | 'kanal' | 'acre' | 'sq ft';
 
@@ -43,6 +43,7 @@ export interface Property {
   status: PropertyStatus;
   contact_name?: string | null;
   phone?: string | null;
+  is_broker?: boolean;
   created_at: string;
   updated_at?: string;
   is_deleted?: boolean;
