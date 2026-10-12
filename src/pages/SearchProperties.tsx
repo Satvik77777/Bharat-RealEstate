@@ -125,7 +125,14 @@ export const SearchProperties: React.FC = () => {
   const [showHouseNo, setShowHouseNo] = useState(false);
 
   // Search execution status: ensures results only appear after search or view all, and disappear on reset
-  const [hasSearched, setHasSearched] = useState(false);
+  const [hasSearched, setHasSearched] = useState(
+    Boolean(
+      searchParams.get('minP') ||
+      searchParams.get('maxP') ||
+      searchParams.get('sector') ||
+      searchParams.get('types')
+    )
+  );
 
   // Active view tab: 'available' properties vs 'sold' properties archive table
   const [activeTab, setActiveTab] = useState<'available' | 'sold'>('available');
@@ -207,6 +214,45 @@ export const SearchProperties: React.FC = () => {
     { label: '2 to 5 Cr', minVal: '2', minUnit: 'Cr', maxVal: '5', maxUnit: 'Cr' },
     { label: '5 Cr and above', minVal: '5', minUnit: 'Cr', maxVal: '', maxUnit: 'Cr' },
   ];
+
+  // Dynamic heading for currently selected or applied budget filter
+  const budgetHeading = useMemo(() => {
+    const min = minPriceVal.trim();
+    const max = maxPriceVal.trim();
+
+    if (!min && !max) return null;
+
+    // Standard Quick Budget Filter presets matching user request:
+    // "properties between 1 to 2 cr or above 5 cr according to what the user has selected"
+    if (!min && max === '50' && maxPriceUnit === 'Lakh') {
+      return 'Properties up to 50 Lakh';
+    }
+    if (min === '50' && minPriceUnit === 'Lakh' && max === '1' && maxPriceUnit === 'Cr') {
+      return 'Properties between 50 Lakh to 1 Cr';
+    }
+    if (min === '1' && minPriceUnit === 'Cr' && max === '2' && maxPriceUnit === 'Cr') {
+      return 'Properties between 1 to 2 Cr';
+    }
+    if (min === '2' && minPriceUnit === 'Cr' && max === '5' && maxPriceUnit === 'Cr') {
+      return 'Properties between 2 to 5 Cr';
+    }
+    if (min === '5' && minPriceUnit === 'Cr' && !max) {
+      return 'Properties above 5 Cr';
+    }
+
+    // Dynamic fallback for custom user inputs
+    if (min && max) {
+      return `Properties between ${min} ${minPriceUnit} to ${max} ${maxPriceUnit}`;
+    }
+    if (min) {
+      return `Properties above ${min} ${minPriceUnit}`;
+    }
+    if (max) {
+      return `Properties up to ${max} ${maxPriceUnit}`;
+    }
+
+    return null;
+  }, [minPriceVal, minPriceUnit, maxPriceVal, maxPriceUnit]);
 
   // Load Reference Data and Dashboard Strip
   const loadReferencesAndMetrics = async () => {
@@ -474,10 +520,21 @@ export const SearchProperties: React.FC = () => {
 
   // Quick range chip click handler
   const handleQuickRange = (range: typeof quickRanges[0]) => {
-    setMinPriceVal(range.minVal);
-    setMinPriceUnit(range.minUnit as PriceUnit);
-    setMaxPriceVal(range.maxVal);
-    setMaxPriceUnit(range.maxUnit as PriceUnit);
+    const isActive =
+      minPriceVal === range.minVal &&
+      minPriceUnit === range.minUnit &&
+      maxPriceVal === range.maxVal &&
+      maxPriceUnit === range.maxUnit;
+
+    if (isActive) {
+      setMinPriceVal('');
+      setMaxPriceVal('');
+    } else {
+      setMinPriceVal(range.minVal);
+      setMinPriceUnit(range.minUnit as PriceUnit);
+      setMaxPriceVal(range.maxVal);
+      setMaxPriceUnit(range.maxUnit as PriceUnit);
+    }
     setCurrentPage(1);
     setHasSearched(true);
   };
@@ -520,43 +577,41 @@ export const SearchProperties: React.FC = () => {
 
 
 
-  // Permanently delete property (soft delete in DB)
+  // Move property to Sold Properties (replaces permanent delete; can be edited or restored to unsold anytime)
   const handleDeleteProperty = async (prop: Property) => {
     try {
       if (!isSupabaseConfigured) {
         const all: any[] = JSON.parse(localStorage.getItem('re_mock_properties') || '[]');
-        const updated = all.filter((p) => p.id !== prop.id);
+        const updated = all.map((p) => (p.id === prop.id ? { ...p, status: 'sold' } : p));
         localStorage.setItem('re_mock_properties', JSON.stringify(updated));
       } else {
-        const { error } = await supabase.rpc('soft_delete_property', { p_id: prop.id });
-        if (error) {
-          const { error: directError } = await supabase
-            .from('properties')
-            .update({ is_deleted: true })
-            .eq('id', prop.id);
-          if (directError) throw directError;
-        }
+        const { error } = await supabase
+          .from('properties')
+          .update({ status: 'sold' })
+          .eq('id', prop.id);
+        if (error) throw error;
       }
 
       showToast({
         type: 'success',
-        title: 'Property Deleted',
-        message: `Property ${formatPropertyId(prop.plot_id)} removed from active inventory.`,
+        title: 'Moved to Sold Records',
+        message: `Property ${formatPropertyId(prop.plot_id)} moved to Sold Properties table. You can edit it or restore it to unsold anytime.`,
       });
       setPropertyToDelete(null);
       setProperties((prev) => prev.filter((p) => p.id !== prop.id));
       setTotalCount((c) => Math.max(0, c - 1));
+      setSoldCount((c) => c + 1);
       loadReferencesAndMetrics();
     } catch (err: any) {
       showToast({
         type: 'error',
-        title: 'Delete Failed',
-        message: err.message || 'Could not delete property',
+        title: 'Action Failed',
+        message: err.message || 'Could not move property to sold records',
       });
     }
   };
 
-  // Restore sold property to Available
+  // Restore sold property back to Unsold (Available)
   const handleRestoreToAvailable = async (prop: Property) => {
     try {
       if (!isSupabaseConfigured) {
@@ -573,8 +628,8 @@ export const SearchProperties: React.FC = () => {
 
       showToast({
         type: 'success',
-        title: 'Property Restored!',
-        message: `Property ${formatPropertyId(prop.plot_id)} restored to Available inventory.`,
+        title: 'Restored to Unsold!',
+        message: `Property ${formatPropertyId(prop.plot_id)} restored to unsold inventory and will now appear on Search page.`,
       });
       loadSoldProperties();
       if (hasSearched) executeSearch();
@@ -1339,6 +1394,41 @@ export const SearchProperties: React.FC = () => {
       {/* Available Properties View */}
       {activeTab === 'available' && (
         <>
+          {/* Active Budget Heading Banner */}
+          {hasSearched && budgetHeading && (
+            <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm animate-in fade-in duration-200">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-brand-50 dark:bg-brand-950/70 text-brand-600 dark:text-brand-400 border border-brand-200/70 dark:border-brand-800/70 flex items-center justify-center font-bold text-base shrink-0">
+                  ₹
+                </div>
+                <div>
+                  <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tracking-tight">
+                    {budgetHeading}
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {isLoading
+                      ? 'Fetching matching properties...'
+                      : `${totalCount} ${totalCount === 1 ? 'property' : 'properties'} found in active inventory`}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setMinPriceVal('');
+                  setMaxPriceVal('');
+                  setCurrentPage(1);
+                }}
+                className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-800 transition-colors"
+                title="Clear budget filter"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Clear Budget</span>
+              </button>
+            </div>
+          )}
+
           {/* Action Bar for Selected Properties: WhatsApp Share & Copy */}
           {hasSearched && properties.length > 0 && (
             <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 shadow-sm">
@@ -1920,23 +2010,34 @@ export const SearchProperties: React.FC = () => {
                         </p>
                       )}
                     </div>
-                    <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleCopySingleProperty(p)}
-                        className="py-1 px-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1"
-                      >
-                        <Copy className="w-3.5 h-3.5 text-brand-600" />
-                        <span>Copy</span>
-                      </button>
+                    <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/add?edit=${p.id}`)}
+                          className="py-1 px-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 hover:bg-sky-50 dark:hover:bg-sky-950/40 hover:text-sky-600 transition-colors"
+                          title="Edit property details"
+                        >
+                          <Pencil className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+                          <span>Edit Info</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCopySingleProperty(p)}
+                          className="py-1 px-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1"
+                        >
+                          <Copy className="w-3.5 h-3.5 text-brand-600" />
+                          <span>Copy</span>
+                        </button>
+                      </div>
                       <button
                         type="button"
                         onClick={() => handleRestoreToAvailable(p)}
-                        className="py-1 px-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-semibold flex items-center gap-1 hover:bg-emerald-100"
-                        title="Move back to Available inventory"
+                        className="py-1 px-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-semibold flex items-center gap-1 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors"
+                        title="Take back to unsold / active search inventory"
                       >
                         <RotateCcw className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Restore to Available</span>
+                        <span>Make Unsold</span>
                       </button>
                     </div>
                   </div>
@@ -1985,21 +2086,30 @@ export const SearchProperties: React.FC = () => {
                           <div className="inline-flex items-center gap-2">
                             <button
                               type="button"
+                              onClick={() => navigate(`/add?edit=${p.id}`)}
+                              className="py-1 px-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 hover:bg-sky-50 dark:hover:bg-sky-950/50 hover:text-sky-600 dark:hover:text-sky-400 transition-colors"
+                              title="Edit property details"
+                            >
+                              <Pencil className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+                              <span>Edit Info</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRestoreToAvailable(p)}
+                              className="py-1 px-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-semibold flex items-center gap-1 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors"
+                              title="Take back to unsold / active search inventory"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Make Unsold</span>
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => handleCopySingleProperty(p)}
                               className="py-1 px-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 hover:bg-slate-100"
                               title="Copy property data"
                             >
                               <Copy className="w-3.5 h-3.5 text-brand-600" />
                               <span>Copy</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleRestoreToAvailable(p)}
-                              className="py-1 px-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-semibold flex items-center gap-1 hover:bg-emerald-100 transition-colors"
-                              title="Move back to Available inventory"
-                            >
-                              <RotateCcw className="w-3.5 h-3.5 text-emerald-600" />
-                              <span>Restore</span>
                             </button>
                           </div>
                         </td>
@@ -2015,17 +2125,17 @@ export const SearchProperties: React.FC = () => {
 
 
 
-      {/* Delete Property Confirmation Modal */}
+      {/* Delete Property Confirmation Modal (Moves to Sold Records) */}
       {propertyToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
           <div className="w-full max-w-md p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-rose-50 dark:bg-rose-950/40 flex items-center justify-center border border-rose-200 dark:border-rose-900/40 text-rose-600">
-                <Trash2 className="w-5 h-5" />
+              <div className="w-10 h-10 rounded-2xl bg-amber-50 dark:bg-amber-950/40 flex items-center justify-center border border-amber-200 dark:border-amber-900/40 text-amber-600">
+                <Archive className="w-5 h-5" />
               </div>
               <div>
                 <h3 className="font-bold text-slate-900 dark:text-white text-base">
-                  Delete Property Record?
+                  Move to Sold Records?
                 </h3>
                 <p className="text-xs text-slate-500">
                   {formatPropertyId(propertyToDelete.plot_id)} &bull; {propertyToDelete.sector_name || 'N/A'}
@@ -2034,7 +2144,7 @@ export const SearchProperties: React.FC = () => {
             </div>
 
             <p className="text-sm text-slate-600 dark:text-slate-300">
-              Are you sure you want to permanently delete Property <strong>{formatPropertyId(propertyToDelete.plot_id)}</strong>? It will be removed from your inventory and won&apos;t appear in search records.
+              Are you sure you want to remove Property <strong>{formatPropertyId(propertyToDelete.plot_id)}</strong> from active search? It will be moved to the <strong>Sold Properties Table</strong>. You can edit its info or take it back to unsold properties anytime.
             </p>
 
             <div className="flex items-center justify-end gap-3 pt-2">
@@ -2050,8 +2160,8 @@ export const SearchProperties: React.FC = () => {
                 onClick={() => handleDeleteProperty(propertyToDelete)}
                 className="py-2 px-4 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white min-h-[40px] shadow-sm flex items-center gap-1.5"
               >
-                <Trash2 className="w-4 h-4" />
-                <span>Confirm Delete</span>
+                <Archive className="w-4 h-4" />
+                <span>Move to Sold</span>
               </button>
             </div>
           </div>

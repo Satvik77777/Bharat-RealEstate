@@ -4,7 +4,6 @@ import {
   Building,
   Building2,
   Home,
-  AlertTriangle,
   Loader2,
   Sparkles,
   Calculator,
@@ -1310,15 +1309,15 @@ export const AddProperty: React.FC = () => {
               </div>
             </div>
 
-            {/* Duplicate Phone Warning Box */}
+            {/* Multi-Property Owner Notice (Permitted without restriction) */}
             {duplicateMatches.length > 0 && (
-              <div className="p-3 rounded-xl bg-amber-100/90 dark:bg-amber-900/50 border border-amber-300 dark:border-amber-700/60 text-amber-900 dark:text-amber-100 flex items-start gap-2 text-xs">
-                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="p-3 rounded-xl bg-sky-50/90 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800/60 text-sky-900 dark:text-sky-100 flex items-start gap-2 text-xs">
+                <Building2 className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0 mt-0.5" />
                 <div className="flex-1">
-                  <span className="font-bold">Duplicate Phone:</span> Linked to existing listing(s):
+                  <span className="font-bold">Multiple Properties Allowed:</span> This mobile number is also associated with {duplicateMatches.length} other listing{duplicateMatches.length > 1 ? 's' : ''}:
                   <div className="mt-1 flex flex-wrap gap-1">
                     {duplicateMatches.map((m, idx) => (
-                      <span key={idx} className="font-mono font-semibold px-2 py-0.5 rounded bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-700 text-[11px]">
+                      <span key={idx} className="font-mono font-semibold px-2 py-0.5 rounded bg-white dark:bg-slate-900 border border-sky-200 dark:border-sky-700 text-[11px]">
                         {formatPropertyId(m.plot_id)}{m.location ? ` (${m.location})` : ''}
                       </span>
                     ))}
