@@ -6,7 +6,7 @@
 import { formatPrice } from './price';
 import { normalizePhone } from './phone';
 
-export const DEFAULT_CONTACT_CTA = 'Interested?\nCall/whatsapp : 80178-80178';
+export const DEFAULT_CONTACT_CTA = '*Interested?*\n*Call/whatsapp : 80178-80178*';
 
 /**
  * Normalizes property ID into 'JSK-XXXX' standard.
@@ -247,12 +247,13 @@ export function formatSinglePropertyItem(
   }
 
   // Price & Rate logic
+  // If rate per unit (e.g. per gaj, per square feet, per square meter) is given, show ONLY that rate.
+  // If rate is not given, show Total Cost asking (negotiable).
   const rateInfo = extractRate(p.details);
   if (rateInfo) {
     lines.push(`Price per ${rateInfo.rateUnit}: ₹${rateInfo.rateValue}`);
-    lines.push(`Total Cost: ${priceStr} asking (negotiable)`);
   } else {
-    lines.push(`Price: ${priceStr} asking (negotiable)`);
+    lines.push(`Total Cost: ${priceStr} asking (negotiable)`);
   }
 
   // Details: clean notes without redundant rate and dimensions

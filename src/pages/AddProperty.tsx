@@ -10,12 +10,21 @@ import {
   Compass,
   MapPin,
   X,
+  Pencil,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useToast } from '../context/ToastContext';
-import { parsePriceInput, getPricePreview, type PriceUnit } from '../lib/price';
+import { parsePriceInput, getPricePreview, formatPrice, type PriceUnit } from '../lib/price';
 import { normalizePhone } from '../lib/phone';
-import { formatPropertyId } from '../lib/propertyFormat';
+import {
+  formatPropertyId,
+  formatPropertiesText,
+  extractRate,
+  extractDimensions,
+  extractCleanDetails,
+} from '../lib/propertyFormat';
 import { getCachedReferenceData, invalidateReferenceCache } from '../lib/referenceCache';
 import type { Sector, PropertyType, PropertyStatus, AreaUnit, DuplicatePhoneMatch } from '../types/database';
 
@@ -37,6 +46,30 @@ export const commercialOptions: { id: PropertySubType; label: string }[] = [
   { id: 'industry', label: 'Industrial' },
   { id: 'other', label: 'Other' },
 ];
+
+// Session Added Properties: displayed under the form with Edit button until page is refreshed
+export interface SessionAddedProperty {
+  id: string;
+  plot_id: string;
+  sector_name: string;
+  location?: string;
+  house_no?: string;
+  price: number;
+  type_id?: string;
+  type_name: string;
+  area_size?: number | null;
+  area_unit?: string | null;
+  details?: string | null;
+  status: string;
+  is_broker: boolean;
+  contact_name?: string | null;
+  phone?: string | null;
+  length_ft?: string;
+  breadth_ft?: string;
+  rate_value?: string;
+  rate_unit?: string;
+  added_at: string;
+}
 
 // Build composite category - subType name (e.g. "Residential - Plot", "Commercial - Shop")
 export function buildCompositeTypeName(
@@ -375,10 +408,13 @@ export const AddProperty: React.FC = () => {
   // Broker flag (Owner vs Broker)
   const [isBroker, setIsBroker] = useState(false);
 
+  const [sessionAddedProperties, setSessionAddedProperties] = useState<SessionAddedProperty[]>([]);
+  const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null);
+
   const populateFormForEdit = (data: any) => {
     setEditingPropertyId(data.id);
-    setSectorInput(data.sector_name || '');
-    setLocation(data.location || '');
+    setSectorInput(data.sector_name || data.locality_name || '');
+    setLocation(data.location || data.landmark || '');
     setHouseNo(data.house_no || '');
     setSelectedTypeId(data.type_id || '');
     setStatus(data.status || 'available');
@@ -407,14 +443,53 @@ export const AddProperty: React.FC = () => {
       setAreaUnit(data.area_unit as AreaUnit);
     }
 
+    // Direct length/breadth/rate if present in data object
+    if (data.length_ft) setLengthFt(String(data.length_ft));
+    if (data.breadth_ft) setBreadthFt(String(data.breadth_ft));
+    if (data.rate_value) setRateValue(String(data.rate_value));
+    if (data.rate_unit) setRateUnit(data.rate_unit);
+
     // Extract length/breadth if present in details
     const rawDetails = data.details || '';
     const dimMatch = rawDetails.match(/(?:Length:\s*(\d+(?:\.\d+)?)\s*ft,\s*Breadth:\s*(\d+(?:\.\d+)?)\s*ft)|(?:Dim:\s*(\d+(?:\.\d+)?)\s*[x*×]\s*(\d+(?:\.\d+)?))/i);
-    if (dimMatch) {
+    if (dimMatch && !data.length_ft) {
       const l = dimMatch[1] || dimMatch[3];
       const b = dimMatch[2] || dimMatch[4];
       setLengthFt(l);
       setBreadthFt(b);
+    }
+
+    // Extract rate if present in details
+    const rateMatch = rawDetails.match(/Rate:\s*₹?([0-9,]+(?:\.[0-9]+)?)\/(gaj|sqft|acre)/i);
+    if (rateMatch && !data.rate_value) {
+      setRateValue(rateMatch[1].replace(/,/g, ''));
+      if (rateMatch[2].toLowerCase() === 'gaj') setRateUnit('per_gaj');
+      else if (rateMatch[2].toLowerCase() === 'sqft') setRateUnit('per_sqft');
+      else if (rateMatch[2].toLowerCase() === 'acre') setRateUnit('per_acre');
+    }
+
+    // Match Category and SubType
+    const typeName = (data.type_name || '').toLowerCase();
+    if (typeName.includes('commercial')) {
+      setSelectedCategory('commercial');
+      if (typeName.includes('shop')) setSelectedSubType('shop');
+      else if (typeName.includes('agri')) setSelectedSubType('agriculture');
+      else if (typeName.includes('industr')) setSelectedSubType('industry');
+      else if (typeName.includes('plot')) setSelectedSubType('plot');
+      else {
+        setSelectedSubType('other');
+        setOtherTypeText(data.type_name || '');
+      }
+    } else if (typeName) {
+      setSelectedCategory('residential');
+      if (typeName.includes('plot')) setSelectedSubType('plot');
+      else if (typeName.includes('house') || typeName.includes('kothi') || typeName.includes('home')) setSelectedSubType('home');
+      else if (typeName.includes('flat') || typeName.includes('apartment')) setSelectedSubType('flat');
+      else if (typeName.includes('farm')) setSelectedSubType('farmhouse');
+      else {
+        setSelectedSubType('other');
+        setOtherTypeText(data.type_name || '');
+      }
     }
 
     // Clean details for notes textarea
@@ -426,6 +501,53 @@ export const AddProperty: React.FC = () => {
       .replace(/[[\]]/g, '')
       .trim();
     setDetails(cleaned);
+  };
+
+  const handleEditSessionProperty = (prop: SessionAddedProperty) => {
+    populateFormForEdit({
+      ...prop,
+      type_id: prop.type_id || getTypeIdForSubType(selectedSubType, propertyTypes, selectedCategory),
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    showToast({
+      type: 'info',
+      title: `Editing ${formatPropertyId(prop.plot_id)}`,
+      message: 'Property details loaded. Update the fields above and click Update Property.',
+    });
+  };
+
+  const handleCopySessionProperty = async (prop: SessionAddedProperty) => {
+    const text = formatPropertiesText([
+      {
+        plot_id: prop.plot_id,
+        price: prop.price,
+        type_name: prop.type_name,
+        sector_name: prop.sector_name,
+        locality_name: prop.sector_name,
+        location: prop.location,
+        landmark: prop.location,
+        house_no: prop.house_no,
+        area_size: prop.area_size,
+        area_unit: prop.area_unit,
+        status: prop.status,
+        details: prop.details,
+        phone: prop.phone,
+        is_broker: prop.is_broker,
+      },
+    ]);
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedSessionId(prop.id);
+      showToast({
+        type: 'success',
+        title: 'Copied!',
+        message: `${formatPropertyId(prop.plot_id)} copied to clipboard`,
+      });
+      setTimeout(() => setCopiedSessionId(null), 2500);
+    } catch {
+      showToast({ type: 'error', title: 'Copy Failed', message: 'Could not access clipboard' });
+    }
   };
 
   const loadPropertyForEdit = async (propId: string) => {
@@ -721,6 +843,32 @@ export const AddProperty: React.FC = () => {
           );
           localStorage.setItem('re_mock_properties', JSON.stringify(updated));
           showToast({ type: 'success', title: 'Property Updated', message: 'Details updated successfully' });
+          setSessionAddedProperties((prev) =>
+            prev.map((item) =>
+              item.id === editingPropertyId
+                ? {
+                    ...item,
+                    sector_name: cleanSectorName,
+                    location: location.trim() || undefined,
+                    house_no: houseNo.trim() || undefined,
+                    price: parsedPrice,
+                    type_id: finalTypeId,
+                    type_name: targetTypeName,
+                    area_size: areaSize ? Number(areaSize) : null,
+                    area_unit: areaUnit,
+                    details: finalDetails,
+                    status,
+                    is_broker: isBroker,
+                    contact_name: ownerName.trim() || undefined,
+                    phone: cleanPhone || undefined,
+                    length_ft: lengthFt.trim() || undefined,
+                    breadth_ft: breadthFt.trim() || undefined,
+                    rate_value: rateValue.trim() || undefined,
+                    rate_unit: rateUnit || undefined,
+                  }
+                : item
+            )
+          );
         } else {
           // Strictly sequential and unique plot number
           const maxPlotNo = savedList.reduce((max: number, p: any) => Math.max(max, Number(p.plot_no) || 0), 0);
@@ -755,6 +903,30 @@ export const AddProperty: React.FC = () => {
             message: `New Property ID: ${formatPropertyId(newPlotId)} registered successfully.`,
             duration: 6000,
           });
+
+          const newSessionItem: SessionAddedProperty = {
+            id: newProp.id,
+            plot_id: formatPropertyId(newPlotId),
+            sector_name: cleanSectorName,
+            location: location.trim() || undefined,
+            house_no: houseNo.trim() || undefined,
+            price: parsedPrice,
+            type_id: finalTypeId,
+            type_name: targetTypeName,
+            area_size: areaSize ? Number(areaSize) : null,
+            area_unit: areaUnit,
+            details: finalDetails,
+            status,
+            is_broker: isBroker,
+            contact_name: ownerName.trim() || undefined,
+            phone: cleanPhone || undefined,
+            length_ft: lengthFt.trim() || undefined,
+            breadth_ft: breadthFt.trim() || undefined,
+            rate_value: rateValue.trim() || undefined,
+            rate_unit: rateUnit || undefined,
+            added_at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          };
+          setSessionAddedProperties((prev) => [newSessionItem, ...prev]);
         }
         resetForm();
         loadData();
@@ -821,6 +993,32 @@ export const AddProperty: React.FC = () => {
           title: 'Property Updated',
           message: 'Property details updated successfully.',
         });
+        setSessionAddedProperties((prev) =>
+          prev.map((item) =>
+            item.id === editingPropertyId
+              ? {
+                  ...item,
+                  sector_name: cleanSectorName,
+                  location: location.trim() || undefined,
+                  house_no: houseNo.trim() || undefined,
+                  price: parsedPrice,
+                  type_id: finalTypeId,
+                  type_name: targetTypeName,
+                  area_size: areaSize ? Number(areaSize) : null,
+                  area_unit: areaUnit,
+                  details: finalDetails,
+                  status,
+                  is_broker: isBroker,
+                  contact_name: ownerName.trim() || undefined,
+                  phone: cleanPhone || undefined,
+                  length_ft: lengthFt.trim() || undefined,
+                  breadth_ft: breadthFt.trim() || undefined,
+                  rate_value: rateValue.trim() || undefined,
+                  rate_unit: rateUnit || undefined,
+                }
+              : item
+          )
+        );
       } else {
         const createParams: any = {
           p_sector_id: finalSectorId,
@@ -878,14 +1076,67 @@ export const AddProperty: React.FC = () => {
           await supabase.from('properties').update({ is_broker: isBroker }).eq('id', data[0].id).then();
         }
 
-        const rawPlotId = data?.[0]?.plot_id || 'JSK-0000';
-        const assignedId = formatPropertyId(rawPlotId);
+        const newlyAddedId = data?.[0]?.id || ('prop-' + Date.now());
+        let assignedId = formatPropertyId(data?.[0]?.plot_id || 'JSK-0000');
+
+        // Guarantee strictly sequential plot_no without gaps:
+        try {
+          const { data: maxRow } = await supabase
+            .from('properties')
+            .select('plot_no')
+            .neq('id', newlyAddedId)
+            .order('plot_no', { ascending: false })
+            .limit(1);
+
+          const expectedNextPlotNo = (Number(maxRow?.[0]?.plot_no) || 0) + 1;
+          const currentPlotMatch = assignedId.match(/\d+/);
+          const currentPlotNo = currentPlotMatch ? Number(currentPlotMatch[0]) : 0;
+
+          if (currentPlotNo !== expectedNextPlotNo && expectedNextPlotNo > 0) {
+            const correctedPlotId = `JSK-${String(expectedNextPlotNo).padStart(4, '0')}`;
+            await supabase
+              .from('properties')
+              .update({
+                plot_no: expectedNextPlotNo,
+                plot_id: correctedPlotId,
+              })
+              .eq('id', newlyAddedId);
+            assignedId = correctedPlotId;
+          }
+        } catch {
+          // Fallback to initial assignedId
+        }
+
         showToast({
           type: 'success',
           title: `Property ID: ${assignedId}`,
           message: `Saved successfully! Assigned ${assignedId}`,
           duration: 6000,
         });
+
+        const newSessionItem: SessionAddedProperty = {
+          id: newlyAddedId,
+          plot_id: assignedId,
+          sector_name: cleanSectorName,
+          location: location.trim() || undefined,
+          house_no: houseNo.trim() || undefined,
+          price: parsedPrice,
+          type_id: finalTypeId,
+          type_name: targetTypeName,
+          area_size: areaSize ? Number(areaSize) : null,
+          area_unit: areaUnit,
+          details: finalDetails,
+          status,
+          is_broker: isBroker,
+          contact_name: ownerName.trim() || undefined,
+          phone: cleanPhone || undefined,
+          length_ft: lengthFt.trim() || undefined,
+          breadth_ft: breadthFt.trim() || undefined,
+          rate_value: rateValue.trim() || undefined,
+          rate_unit: rateUnit || undefined,
+          added_at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+        setSessionAddedProperties((prev) => [newSessionItem, ...prev.filter((p) => p.id !== newlyAddedId)]);
       }
 
       resetForm();
@@ -1470,6 +1721,170 @@ export const AddProperty: React.FC = () => {
           </div>
         </form>
       </div>
+
+      {/* Properties added during this session (shown underneath with edit option until page is refreshed) */}
+      {sessionAddedProperties.length > 0 && (
+        <div className="space-y-4 pt-2">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                </span>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
+                  Recently Added Properties
+                </h2>
+                <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                  {sessionAddedProperties.length} {sessionAddedProperties.length === 1 ? 'Property' : 'Properties'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Active in this session with quick edit option (persists until page refresh)
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {sessionAddedProperties.map((prop) => {
+              const rateInfo = prop.rate_value
+                ? {
+                    rateValue: Number(prop.rate_value).toLocaleString('en-IN'),
+                    rateUnit: prop.rate_unit === 'per_gaj' ? 'gaj' : prop.rate_unit === 'per_sqft' ? 'sqft' : 'acre',
+                  }
+                : extractRate(prop.details);
+
+              const dims = prop.length_ft && prop.breadth_ft
+                ? { length: `${prop.length_ft} ft`, breadth: `${prop.breadth_ft} ft` }
+                : extractDimensions(prop.details);
+
+              const isBeingEdited = editingPropertyId === prop.id;
+
+              return (
+                <div
+                  key={prop.id}
+                  className={`p-4 sm:p-5 rounded-3xl bg-white dark:bg-slate-900 border transition-all ${
+                    isBeingEdited
+                      ? 'border-brand-500 ring-2 ring-brand-500/20 bg-brand-50/15 dark:bg-brand-950/20 shadow-md'
+                      : 'border-slate-200 dark:border-slate-800 shadow-md hover:border-slate-300 dark:hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono font-bold text-xs sm:text-sm px-2.5 py-1 rounded-xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 shadow-sm">
+                        {formatPropertyId(prop.plot_id)}
+                      </span>
+                      <span className="px-2.5 py-1 rounded-xl text-xs font-semibold bg-brand-50 text-brand-700 dark:bg-brand-950/60 dark:text-brand-300 border border-brand-200 dark:border-brand-800">
+                        {prop.type_name}
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                          prop.is_broker
+                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700'
+                            : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700'
+                        }`}
+                      >
+                        {prop.is_broker ? 'Broker' : 'Owner'}
+                      </span>
+                      <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                        {prop.added_at}
+                      </span>
+                    </div>
+
+                    {/* Action Buttons: Edit and Copy */}
+                    <div className="flex items-center gap-2 self-start sm:self-auto">
+                      <button
+                        type="button"
+                        onClick={() => handleCopySessionProperty(prop)}
+                        className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition-colors min-h-[36px]"
+                        title="Copy formatted text"
+                      >
+                        {copiedSessionId === prop.id ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                            <span className="text-emerald-600 dark:text-emerald-400">Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5 text-slate-500" />
+                            <span>Copy Data</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleEditSessionProperty(prop)}
+                        className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all min-h-[36px] shadow-sm ${
+                          isBeingEdited
+                            ? 'bg-amber-600 hover:bg-amber-700 text-white ring-2 ring-amber-400'
+                            : 'bg-brand-600 hover:bg-brand-700 text-white'
+                        }`}
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                        <span>{isBeingEdited ? 'Editing Above' : 'Edit Property'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Property Details Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-3 text-xs">
+                    <div>
+                      <span className="text-slate-400 text-[11px] block">Locality / Landmark</span>
+                      <span className="font-semibold text-slate-800 dark:text-slate-200">
+                        {prop.sector_name}
+                        {prop.location ? ` • ${prop.location}` : ''}
+                      </span>
+                      {prop.house_no && (
+                        <span className="block text-slate-500 dark:text-slate-400 text-[11px]">
+                          House No: {prop.house_no}
+                        </span>
+                      )}
+                    </div>
+
+                    <div>
+                      <span className="text-slate-400 text-[11px] block">Price / Rate</span>
+                      {rateInfo ? (
+                        <span className="font-bold text-brand-600 dark:text-brand-400 text-sm block">
+                          Price per {rateInfo.rateUnit}: ₹{rateInfo.rateValue}
+                        </span>
+                      ) : (
+                        <span className="font-bold text-brand-600 dark:text-brand-400 text-sm block">
+                          Total Cost: {formatPrice(prop.price)} asking (negotiable)
+                        </span>
+                      )}
+                    </div>
+
+                    <div>
+                      <span className="text-slate-400 text-[11px] block">Area & Dimensions</span>
+                      <span className="font-medium text-slate-700 dark:text-slate-300">
+                        {prop.area_size ? `${prop.area_size} ${prop.area_unit || 'sq yard'}` : 'N/A'}
+                        {dims.length && dims.breadth ? ` • ${dims.length} × ${dims.breadth}` : ''}
+                      </span>
+                    </div>
+
+                    {(prop.contact_name || prop.phone) && (
+                      <div className="sm:col-span-2 md:col-span-3 pt-1 border-t border-slate-100 dark:border-slate-800/60 flex items-center gap-3">
+                        <span className="text-slate-400 text-[11px]">Contact:</span>
+                        <span className="font-medium text-slate-700 dark:text-slate-300">
+                          {prop.contact_name || (prop.is_broker ? 'Broker' : 'Owner')}
+                          {prop.phone ? ` • ${normalizePhone(prop.phone).formatted || prop.phone}` : ''}
+                        </span>
+                      </div>
+                    )}
+
+                    {prop.details && extractCleanDetails(prop.details) && (
+                      <div className="sm:col-span-2 md:col-span-3 text-slate-500 italic">
+                        Note: {extractCleanDetails(prop.details)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

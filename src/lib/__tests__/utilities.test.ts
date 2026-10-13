@@ -206,17 +206,17 @@ describe('Property ID & Copy Text Formatting (propertyFormat)', () => {
     expect(textWithCta).toContain('Locality: Sector 7');
     expect(textWithCta).toContain('Landmark: near market');
     expect(textWithCta).toContain('House No: 2135');
-    expect(textWithCta).toContain('Price: ₹3 Cr asking (negotiable)');
+    expect(textWithCta).toContain('Total Cost: ₹3 Cr asking (negotiable)');
     expect(textWithCta).toContain('Details: south facing');
     expect(textWithCta).not.toContain('Status:');
-    expect(textWithCta).toContain('Interested?');
-    expect(textWithCta).toContain('Call/whatsapp : 80178-80178');
+    expect(textWithCta).toContain('*Interested?*');
+    expect(textWithCta).toContain('*Call/whatsapp : 80178-80178*');
 
     // Test landmark & house no hiding when showLocation is false or showHouseNo is false
     const textWithoutLoc = formatPropertiesText([item], { showLocation: false, includeContactCta: true });
     expect(textWithoutLoc).not.toContain('Landmark:');
     expect(textWithoutLoc).not.toContain('House No:');
-    expect(textWithoutLoc).toContain('Price: ₹3 Cr asking (negotiable)');
+    expect(textWithoutLoc).toContain('Total Cost: ₹3 Cr asking (negotiable)');
 
     const textWithoutCta = formatPropertiesText([item], { includeContactCta: false });
     expect(textWithoutCta).not.toContain('Interested?');
@@ -242,15 +242,15 @@ describe('Property ID & Copy Text Formatting (propertyFormat)', () => {
     const multiText = formatPropertiesText(items, { includeContactCta: true });
     expect(multiText).toContain('Property ID: JSK-0001');
     expect(multiText).toContain('Type: Residential - Plot');
-    expect(multiText).toContain('Price: ₹1.5 Cr asking (negotiable)');
+    expect(multiText).toContain('Total Cost: ₹1.5 Cr asking (negotiable)');
     expect(multiText).toContain('Property ID: JSK-0002');
     expect(multiText).toContain('Type: Residential - Flat / Apartment');
-    expect(multiText).toContain('Price: ₹3 Cr asking (negotiable)');
+    expect(multiText).toContain('Total Cost: ₹3 Cr asking (negotiable)');
     expect(multiText).toContain('----------------------------------------');
-    expect(multiText).toContain('Interested?\nCall/whatsapp : 80178-80178');
+    expect(multiText).toContain('*Interested?*\n*Call/whatsapp : 80178-80178*');
   });
 
-  it('formats per-unit rate when given and prints Total Cost with asking (negotiable), or Price only when not given', () => {
+  it('formats per-unit rate when given (and omits Total Cost), or prints Total Cost only when rate is not given', () => {
     const itemWithRate = {
       plot_id: 'JSK-0071',
       price: 13400000,
@@ -269,7 +269,7 @@ describe('Property ID & Copy Text Formatting (propertyFormat)', () => {
     expect(text).toContain('Locality: Hari nagar');
     expect(text).toContain('Landmark: Near to Pipli road');
     expect(text).toContain('Price per gaj: ₹60,000');
-    expect(text).toContain('Total Cost: ₹1.34 Cr asking (negotiable)');
+    expect(text).not.toContain('Total Cost:');
     expect(text).toContain('Details: East face');
 
     const itemWithoutRate = {
@@ -281,9 +281,8 @@ describe('Property ID & Copy Text Formatting (propertyFormat)', () => {
     };
 
     const textWithout = formatSinglePropertyItem(itemWithoutRate);
-    expect(textWithout).toContain('Price: ₹1.34 Cr asking (negotiable)');
+    expect(textWithout).toContain('Total Cost: ₹1.34 Cr asking (negotiable)');
     expect(textWithout).not.toContain('Price per');
-    expect(textWithout).not.toContain('Total Cost:');
   });
 });
 
