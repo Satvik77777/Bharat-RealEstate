@@ -250,6 +250,30 @@ describe('Property ID & Copy Text Formatting (propertyFormat)', () => {
     expect(multiText).toContain('*Interested?*\n*Call/whatsapp : 80178-80178*');
   });
 
+  it('prepends bold header title at top when headerTitle option is provided (e.g. Properties between 1 to 2 Cr)', () => {
+    const item = {
+      plot_id: 'JSK-0011',
+      price: 15000000,
+      type_name: 'Flat',
+      sector_name: 'Hari nagar',
+    };
+
+    const textWithHeader = formatPropertiesText([item], {
+      headerTitle: 'Properties between 1 to 2 Cr',
+      includeContactCta: true,
+    });
+
+    expect(textWithHeader.startsWith('*Properties between 1 to 2 Cr*\n\nProperty ID: JSK-0011')).toBe(true);
+    expect(textWithHeader).toContain('*Interested?*');
+
+    // Should not double-wrap if already wrapped with asterisks
+    const textAlreadyBold = formatPropertiesText([item], {
+      headerTitle: '*Properties between 2 to 5 Cr*',
+      includeContactCta: false,
+    });
+    expect(textAlreadyBold.startsWith('*Properties between 2 to 5 Cr*\n\nProperty ID: JSK-0011')).toBe(true);
+  });
+
   it('formats per-unit rate when given (and omits Total Cost), or prints Total Cost only when rate is not given', () => {
     const itemWithRate = {
       plot_id: 'JSK-0071',

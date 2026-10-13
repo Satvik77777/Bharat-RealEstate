@@ -178,6 +178,7 @@ export interface PropertyCopyOptions {
   showHouseNo?: boolean;
   includeContactCta?: boolean;
   contactCtaText?: string;
+  headerTitle?: string | null;
 }
 
 /**
@@ -291,6 +292,14 @@ export function formatPropertiesText(
     if (cta) {
       text += `\n\n${cta}`;
     }
+  }
+
+  if (options.headerTitle && options.headerTitle.trim()) {
+    const cleanHeader = options.headerTitle.trim();
+    const boldHeader = cleanHeader.startsWith('*') && cleanHeader.endsWith('*')
+      ? cleanHeader
+      : `*${cleanHeader}*`;
+    text = `${boldHeader}\n\n${text}`;
   }
 
   return text;

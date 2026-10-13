@@ -715,6 +715,7 @@ export const SearchProperties: React.FC = () => {
       showLocation: true,
       showHouseNo: showHouseNo,
       includeContactCta: true,
+      headerTitle: activeTab === 'available' ? budgetHeading : null,
     });
     const link = buildWhatsAppLink(null, message);
     window.open(link, '_blank');
@@ -733,10 +734,20 @@ export const SearchProperties: React.FC = () => {
       showLocation: true,
       showHouseNo: showHouseNo,
       includeContactCta: true,
+      headerTitle: activeTab === 'available' ? budgetHeading : null,
     });
 
     try {
-      await navigator.clipboard.writeText(message);
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(message);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = message;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
       showToast({
         type: 'success',
         title: 'Copied!',
@@ -754,10 +765,20 @@ export const SearchProperties: React.FC = () => {
       showLocation: true,
       showHouseNo: showHouseNo,
       includeContactCta: true,
+      headerTitle: activeTab === 'available' ? budgetHeading : null,
     });
 
     try {
-      await navigator.clipboard.writeText(textToCopy);
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(textToCopy);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = textToCopy;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
       showToast({
         type: 'success',
         title: 'Copied!',
