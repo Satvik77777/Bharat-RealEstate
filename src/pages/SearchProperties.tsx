@@ -34,7 +34,7 @@ import { useToast } from '../context/ToastContext';
 import { parsePriceInput, formatPrice, type PriceUnit } from '../lib/price';
 import { normalizePhone } from '../lib/phone';
 import { buildWhatsAppLink } from '../lib/whatsapp';
-import { formatPropertyId, formatPropertiesText } from '../lib/propertyFormat';
+import { formatPropertyId, formatPropertiesText, formatCategoryTypeName } from '../lib/propertyFormat';
 import { generateCsv, downloadCsv, buildPropertyCsvData } from '../lib/csv';
 import { getCachedReferenceData } from '../lib/referenceCache';
 import type { Property, Sector, PropertyType } from '../types/database';
@@ -650,19 +650,19 @@ export const SearchProperties: React.FC = () => {
       if (category === 'residential') {
         if (selectedSubType === 'shop' || selectedSubType === 'agriculture' || selectedSubType === 'industry') {
           setSelectedSubType('plot');
-          const tid = getTypeIdForSubType('plot', propertyTypes);
+          const tid = getTypeIdForSubType('plot', propertyTypes, category);
           setSelectedTypes(tid ? [tid] : []);
         } else {
-          const tid = getTypeIdForSubType(selectedSubType, propertyTypes);
+          const tid = getTypeIdForSubType(selectedSubType, propertyTypes, category);
           setSelectedTypes(tid ? [tid] : []);
         }
       } else {
         if (selectedSubType === 'home' || selectedSubType === 'flat' || selectedSubType === 'farmhouse') {
           setSelectedSubType('plot');
-          const tid = getTypeIdForSubType('plot', propertyTypes);
+          const tid = getTypeIdForSubType('plot', propertyTypes, category);
           setSelectedTypes(tid ? [tid] : []);
         } else {
-          const tid = getTypeIdForSubType(selectedSubType, propertyTypes);
+          const tid = getTypeIdForSubType(selectedSubType, propertyTypes, category);
           setSelectedTypes(tid ? [tid] : []);
         }
       }
@@ -678,7 +678,7 @@ export const SearchProperties: React.FC = () => {
       setSelectedTypes([]);
     } else {
       setSelectedSubType(subType);
-      const tid = getTypeIdForSubType(subType, propertyTypes);
+      const tid = getTypeIdForSubType(subType, propertyTypes, selectedCategory);
       setSelectedTypes(tid ? [tid] : []);
     }
     setCurrentPage(1);
@@ -1107,20 +1107,20 @@ export const SearchProperties: React.FC = () => {
           </div>
         </div>
 
-        {/* 3. Balanced 2-Column Row: Sector / Colony (Left) & Price Range (Right) */}
+        {/* 3. Balanced 2-Column Row: Locality (Left) & Price Range (Right) */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 pt-1">
-          {/* Left Column: Sector / Colony (Input with Dropdown Suggestions) */}
+          {/* Left Column: Locality (Input with Dropdown Suggestions) */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                Sector / Colony
+                Locality
               </label>
               <span className="text-[11px] text-slate-400">Type or pick from list</span>
             </div>
             <div className="relative">
               <input
                 type="text"
-                placeholder="e.g. Mohan Nagar, Sector 3, Sector 14..."
+                placeholder="e.g. Mohan Nagar, Urban Estate, Sector 7..."
                 value={sectorInput}
                 onFocus={() => setIsSectorDropdownOpen(true)}
                 onBlur={() => {
@@ -1143,7 +1143,7 @@ export const SearchProperties: React.FC = () => {
                     setCurrentPage(1);
                   }}
                   className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                  title="Clear sector"
+                  title="Clear locality"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -1153,7 +1153,7 @@ export const SearchProperties: React.FC = () => {
               {isSectorDropdownOpen && filteredSectors.length > 0 && (
                 <div className="absolute z-30 left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden py-1 max-h-60 overflow-y-auto">
                   <div className="px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-800/80">
-                    {sectorInput.trim() ? `Matching Sectors (${filteredSectors.length})` : 'All Available Sectors'}
+                    {sectorInput.trim() ? `Matching Localities (${filteredSectors.length})` : 'All Available Localities'}
                   </div>
                   {filteredSectors.map((s) => (
                     <button
@@ -1658,19 +1658,19 @@ export const SearchProperties: React.FC = () => {
                       <div className="mt-2 space-y-1">
                         <div className="flex items-baseline justify-between">
                           <h4 className="font-bold text-sm text-slate-900 dark:text-white">
-                            {p.type_name || 'Property'}
+                            {formatCategoryTypeName(p.type_name, p.details)}
                           </h4>
                           <span className="font-extrabold text-brand-600 dark:text-brand-400 text-base">
                             {formatPrice(p.price)}
                           </span>
                         </div>
                         <p className="text-xs text-slate-600 dark:text-slate-400">
-                          Sector: <span className="font-medium text-slate-900 dark:text-slate-200">{p.sector_name || 'N/A'}</span>
+                          Locality: <span className="font-medium text-slate-900 dark:text-slate-200">{p.sector_name || 'N/A'}</span>
                         </p>
                         <div className="text-xs text-slate-600 dark:text-slate-400 space-y-0.5">
                           {p.location && (
                             <p>
-                              Location: <span className="font-medium text-slate-900 dark:text-slate-200">{p.location}</span>
+                              Landmark: <span className="font-medium text-slate-900 dark:text-slate-200">{p.location}</span>
                             </p>
                           )}
                           {showHouseNo && p.house_no && (
@@ -1762,8 +1762,8 @@ export const SearchProperties: React.FC = () => {
                       </th>
                       <th className="py-3 px-4">Property ID</th>
                       <th className="py-3 px-4 text-center">O / B</th>
-                      <th className="py-3 px-4">Sector</th>
-                      <th className="py-3 px-4">Location / No</th>
+                      <th className="py-3 px-4">Locality</th>
+                      <th className="py-3 px-4">Landmark / House No</th>
                       <th className="py-3 px-4">Type</th>
                       <th className="py-3 px-4">Price</th>
                       <th className="py-3 px-4">Area</th>
@@ -1817,7 +1817,7 @@ export const SearchProperties: React.FC = () => {
                             <div className="font-medium text-slate-900 dark:text-white">{p.location || '—'}</div>
                             {showHouseNo && p.house_no && <div className="text-xs text-brand-600 dark:text-brand-400">House: {p.house_no}</div>}
                           </td>
-                          <td className="py-3 px-4">{p.type_name || 'Property'}</td>
+                          <td className="py-3 px-4">{formatCategoryTypeName(p.type_name, p.details)}</td>
                           <td className="py-3 px-4 font-bold text-slate-900 dark:text-white">
                             {formatPrice(p.price)}
                           </td>
@@ -1990,18 +1990,18 @@ export const SearchProperties: React.FC = () => {
                     <div className="mt-2 space-y-1">
                       <div className="flex items-baseline justify-between">
                         <h4 className="font-bold text-sm text-slate-900 dark:text-white">
-                          {p.type_name || 'Property'}
+                          {formatCategoryTypeName(p.type_name, p.details)}
                         </h4>
                         <span className="font-extrabold text-slate-500 dark:text-slate-400 text-base line-through">
                           {formatPrice(p.price)}
                         </span>
                       </div>
                       <p className="text-xs text-slate-600 dark:text-slate-400">
-                        Sector: <span className="font-medium text-slate-900 dark:text-slate-200">{p.sector_name || 'N/A'}</span>
+                        Locality: <span className="font-medium text-slate-900 dark:text-slate-200">{p.sector_name || 'N/A'}</span>
                       </p>
                       {p.location && (
                         <p className="text-xs text-slate-600 dark:text-slate-400">
-                          Location: <span className="font-medium text-slate-900 dark:text-slate-200">{p.location}</span>
+                          Landmark: <span className="font-medium text-slate-900 dark:text-slate-200">{p.location}</span>
                         </p>
                       )}
                       {showHouseNo && p.house_no && (
@@ -2050,8 +2050,8 @@ export const SearchProperties: React.FC = () => {
                   <thead className="sticky top-0 z-20 bg-slate-50/95 dark:bg-slate-800/95 backdrop-blur-md">
                     <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-semibold uppercase tracking-wider text-slate-500">
                       <th className="py-3 px-4">Property ID</th>
-                      <th className="py-3 px-4">Sector</th>
-                      <th className="py-3 px-4">Location / No</th>
+                      <th className="py-3 px-4">Locality</th>
+                      <th className="py-3 px-4">Landmark / House No</th>
                       <th className="py-3 px-4">Type</th>
                       <th className="py-3 px-4">Sold Price</th>
                       <th className="py-3 px-4">Area</th>
@@ -2070,7 +2070,7 @@ export const SearchProperties: React.FC = () => {
                           <div className="font-medium text-slate-900 dark:text-white">{p.location || '—'}</div>
                           {showHouseNo && p.house_no && <div className="text-xs text-brand-600 dark:text-brand-400">House: {p.house_no}</div>}
                         </td>
-                        <td className="py-3 px-4">{p.type_name || 'Property'}</td>
+                        <td className="py-3 px-4">{formatCategoryTypeName(p.type_name, p.details)}</td>
                         <td className="py-3 px-4 font-bold text-slate-600 dark:text-slate-400">
                           {formatPrice(p.price)}
                         </td>

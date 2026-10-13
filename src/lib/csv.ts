@@ -7,7 +7,7 @@
  */
 
 import { formatPrice } from './price';
-import { formatPropertyId } from './propertyFormat';
+import { formatPropertyId, formatCategoryTypeName } from './propertyFormat';
 import { normalizePhone } from './phone';
 
 /**
@@ -65,8 +65,10 @@ export interface CsvExportOptions {
 
 export interface GenericPropertyExportItem {
   plot_id?: string | null;
+  locality_name?: string | null;
   sector_name?: string | null;
   sector?: string | null;
+  landmark?: string | null;
   location?: string | null;
   house_no?: string | null;
   type_name?: string | null;
@@ -148,8 +150,8 @@ export function buildPropertyCsvData(
   const headers = [
     'Property ID',
     'Listed By',
-    'Sector',
-    'Location',
+    'Locality',
+    'Landmark',
     'House No',
     'Type',
     'Price',
@@ -163,17 +165,18 @@ export function buildPropertyCsvData(
 
   const rows = properties.map((p) => {
     const meta = extractPropertyMetadata(p.details, p.is_broker);
-    const sector = (p.sector_name || p.sector || '').trim() || '—';
-    const location = (p.location || '').trim() || '—';
+    const locality = (p.locality_name || p.sector_name || p.sector || '').trim() || '—';
+    const landmark = (p.landmark || p.location || '').trim() || '—';
     const houseNo = (p.house_no || '').trim() || '—';
-    const propType = (p.type_name || p.property_type || '').trim() || 'Plot';
+    const rawType = (p.type_name || p.property_type || '').trim();
+    const propType = formatCategoryTypeName(rawType, p.details);
     const area = p.area_size ? `${p.area_size} ${p.area_unit || 'sq yard'}` : '—';
 
     const row: (string | number)[] = [
       formatPropertyId(p.plot_id),
       meta.listedBy,
-      sector,
-      location,
+      locality,
+      landmark,
       houseNo,
       propType,
       formatPrice(p.price),

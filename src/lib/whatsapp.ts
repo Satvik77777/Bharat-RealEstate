@@ -5,7 +5,7 @@
 
 import { normalizePhone } from './phone';
 import { formatPrice } from './price';
-import { formatPropertyId, DEFAULT_CONTACT_CTA } from './propertyFormat';
+import { formatPropertyId, formatCategoryTypeName, DEFAULT_CONTACT_CTA } from './propertyFormat';
 
 export { formatPropertyId, DEFAULT_CONTACT_CTA } from './propertyFormat';
 
@@ -70,16 +70,16 @@ export function formatPropertiesMessage(
     const propId = formatPropertyId(p.plot_id);
     const priceStr = formatPrice(p.price);
     const areaStr = p.area_size ? `${p.area_size} ${p.area_unit || ''}`.trim() : null;
-    const typeStr = p.type_name || 'Property';
-    const sectorStr = p.sector_name || p.location || 'Prime Location';
+    const typeStr = formatCategoryTypeName(p.type_name);
+    const localityStr = p.sector_name || p.location || 'Prime Locality';
 
-    lines.push(`${idx + 1}. *[${propId}]* ${typeStr} in ${sectorStr}`);
+    lines.push(`${idx + 1}. *[${propId}]* ${typeStr} in ${localityStr}`);
     lines.push(`   💰 Price: ${priceStr}`);
     if (areaStr) {
       lines.push(`   📐 Area: ${areaStr}`);
     }
-    if (p.location && p.location !== sectorStr) {
-      lines.push(`   📍 Locality: ${p.location}`);
+    if (p.location && p.location !== localityStr) {
+      lines.push(`   📍 Landmark: ${p.location}`);
     }
     if (p.phone) {
       lines.push(`   📞 Owner/Contact: ${p.phone}`);

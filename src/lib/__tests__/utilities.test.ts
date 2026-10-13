@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { parsePriceInput, formatPrice, getPricePreview, priceInWords } from '../price';
 import { normalizePhone, isValidPhone } from '../phone';
 import { buildWhatsAppLink, formatPropertiesMessage, type WhatsAppPropertyItem } from '../whatsapp';
-import { formatPropertyId, formatPropertiesText } from '../propertyFormat';
+import { formatPropertyId, formatPropertiesText, formatSinglePropertyItem } from '../propertyFormat';
 import { csvEscapeCell, generateCsv, buildPropertyCsvData, extractPropertyMetadata } from '../csv';
 
 describe('Price Parsing (parsePriceInput)', () => {
@@ -183,7 +183,7 @@ describe('Property ID & Copy Text Formatting (propertyFormat)', () => {
     expect(formatPropertyId(null)).toBe('JSK-0000');
   });
 
-  it('formats single property text with Price, bold Property ID & Details, no status, and optional CTA footer', () => {
+  it('formats single property text with Locality, Landmark, dimensions, Price, and CTA footer', () => {
     const item = {
       plot_id: 'P-0024',
       price: 30000000,
@@ -198,21 +198,23 @@ describe('Property ID & Copy Text Formatting (propertyFormat)', () => {
     };
 
     const textWithCta = formatPropertiesText([item], { showHouseNo: true, includeContactCta: true });
-    expect(textWithCta).toContain('*Property ID:* JSK-0024');
-    expect(textWithCta).toContain('Price: ₹3 Cr asking (negotiable)');
-    expect(textWithCta).toContain('Type: Plot');
-    expect(textWithCta).toContain('Location: near market');
-    expect(textWithCta).toContain('House No: 2135');
-    expect(textWithCta).toContain('Sector: Sector 7');
+    expect(textWithCta).toContain('Property ID: JSK-0024');
+    expect(textWithCta).toContain('Type: Residential - Plot');
+    expect(textWithCta).toContain('Length: 30 ft');
+    expect(textWithCta).toContain('Breadth: 60 ft');
     expect(textWithCta).toContain('Area: 75 sq yard');
+    expect(textWithCta).toContain('Locality: Sector 7');
+    expect(textWithCta).toContain('Landmark: near market');
+    expect(textWithCta).toContain('House No: 2135');
+    expect(textWithCta).toContain('Price: ₹3 Cr asking (negotiable)');
+    expect(textWithCta).toContain('Details: south facing');
     expect(textWithCta).not.toContain('Status:');
-    expect(textWithCta).toContain('*Details:* south facing Length: 30 ft, Breadth: 60 ft');
     expect(textWithCta).toContain('Interested?');
     expect(textWithCta).toContain('Call/whatsapp : 80178-80178');
 
-    // Test location & house no hiding when showLocation is false or showHouseNo is false
+    // Test landmark & house no hiding when showLocation is false or showHouseNo is false
     const textWithoutLoc = formatPropertiesText([item], { showLocation: false, includeContactCta: true });
-    expect(textWithoutLoc).not.toContain('Location:');
+    expect(textWithoutLoc).not.toContain('Landmark:');
     expect(textWithoutLoc).not.toContain('House No:');
     expect(textWithoutLoc).toContain('Price: ₹3 Cr asking (negotiable)');
 
@@ -238,12 +240,50 @@ describe('Property ID & Copy Text Formatting (propertyFormat)', () => {
     ];
 
     const multiText = formatPropertiesText(items, { includeContactCta: true });
-    expect(multiText).toContain('*Property ID:* JSK-0001');
+    expect(multiText).toContain('Property ID: JSK-0001');
+    expect(multiText).toContain('Type: Residential - Plot');
     expect(multiText).toContain('Price: ₹1.5 Cr asking (negotiable)');
-    expect(multiText).toContain('*Property ID:* JSK-0002');
+    expect(multiText).toContain('Property ID: JSK-0002');
+    expect(multiText).toContain('Type: Residential - Flat / Apartment');
     expect(multiText).toContain('Price: ₹3 Cr asking (negotiable)');
     expect(multiText).toContain('----------------------------------------');
     expect(multiText).toContain('Interested?\nCall/whatsapp : 80178-80178');
+  });
+
+  it('formats per-unit rate when given and prints Total Cost with asking (negotiable), or Price only when not given', () => {
+    const itemWithRate = {
+      plot_id: 'JSK-0071',
+      price: 13400000,
+      type_name: 'Plot',
+      sector_name: 'Hari nagar',
+      location: 'Near to Pipli road',
+      area_size: 224,
+      area_unit: 'sq yard',
+      details: '[Rate: ₹60,000/gaj] East face',
+    };
+
+    const text = formatSinglePropertyItem(itemWithRate);
+    expect(text).toContain('Property ID: JSK-0071');
+    expect(text).toContain('Type: Residential - Plot');
+    expect(text).toContain('Area: 224 sq yard');
+    expect(text).toContain('Locality: Hari nagar');
+    expect(text).toContain('Landmark: Near to Pipli road');
+    expect(text).toContain('Price per gaj: ₹60,000');
+    expect(text).toContain('Total Cost: ₹1.34 Cr asking (negotiable)');
+    expect(text).toContain('Details: East face');
+
+    const itemWithoutRate = {
+      plot_id: 'JSK-0072',
+      price: 13400000,
+      type_name: 'Plot',
+      sector_name: 'Hari nagar',
+      details: 'East face',
+    };
+
+    const textWithout = formatSinglePropertyItem(itemWithoutRate);
+    expect(textWithout).toContain('Price: ₹1.34 Cr asking (negotiable)');
+    expect(textWithout).not.toContain('Price per');
+    expect(textWithout).not.toContain('Total Cost:');
   });
 });
 
@@ -324,8 +364,8 @@ describe('CSV Escaping & Formula Injection Protection', () => {
     expect(headers).toEqual([
       'Property ID',
       'Listed By',
-      'Sector',
-      'Location',
+      'Locality',
+      'Landmark',
       'House No',
       'Type',
       'Price',
@@ -342,7 +382,7 @@ describe('CSV Escaping & Formula Injection Protection', () => {
       'Sector 8',
       '—',
       '—',
-      'Residential (House/Kothi)',
+      'Residential - House/Kothi',
       '₹2.75 Cr',
       27500000,
       '8 marla',
@@ -357,7 +397,7 @@ describe('CSV Escaping & Formula Injection Protection', () => {
       'Kohinoor City I',
       '—',
       '15A',
-      'Plot',
+      'Residential - Plot',
       '₹69.3 Lakh',
       6930000,
       '154 sq yard',

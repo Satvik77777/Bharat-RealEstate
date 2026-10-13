@@ -22,8 +22,8 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { parsePriceInput, formatPrice, type PriceUnit } from '../lib/price';
 import { normalizePhone } from '../lib/phone';
-import { buildWhatsAppLink, formatPropertiesMessage, type WhatsAppPropertyItem } from '../lib/whatsapp';
-import { formatPropertyId } from '../lib/propertyFormat';
+import { formatPropertyId, formatCategoryTypeName } from '../lib/propertyFormat';
+import { formatPropertiesMessage, buildWhatsAppLink, type WhatsAppPropertyItem } from '../lib/whatsapp';
 import { CopyPhoneIcon } from './SearchProperties';
 import {
   type PropertyCategory,
@@ -988,11 +988,11 @@ export const BuyerRequirements: React.FC = () => {
             {errors.budget && <p className="text-xs text-rose-500 mt-1">{errors.budget}</p>}
           </div>
 
-          {/* 3. Preferred Sector / Colony (Full Width with Any Sector + Specific Area Input) */}
+          {/* 3. Preferred Locality (Full Width with Any Locality + Specific Locality Input) */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                Preferred Sector / Colony <span className="text-slate-400 font-normal">(Default: Any Sector)</span>
+                Preferred Locality <span className="text-slate-400 font-normal">(Default: Any Locality)</span>
               </label>
               {selectedSectors.length > 0 && (
                 <button
@@ -1000,13 +1000,13 @@ export const BuyerRequirements: React.FC = () => {
                   onClick={() => setSelectedSectors([])}
                   className="text-xs text-brand-600 dark:text-brand-400 hover:underline font-semibold"
                 >
-                  Reset to Any Sector
+                  Reset to Any Locality
                 </button>
               )}
             </div>
 
             <div className="flex flex-col sm:flex-row gap-2.5">
-              {/* Default: Any Sector Button */}
+              {/* Default: Any Locality Button */}
               <button
                 type="button"
                 onClick={() => setSelectedSectors([])}
@@ -1021,14 +1021,14 @@ export const BuyerRequirements: React.FC = () => {
                     selectedSectors.length === 0 ? 'text-brand-600 dark:text-brand-400 stroke-[3]' : 'opacity-20'
                   }`}
                 />
-                <span>Any Sector / Colony</span>
+                <span>Any Locality</span>
               </button>
 
-              {/* Specific Area Input with Live Autocomplete */}
+              {/* Specific Locality Input with Live Autocomplete */}
               <div className="relative flex-1">
                 <input
                   type="text"
-                  placeholder="Type specific area (e.g. Mohan Nagar, Sector 7)..."
+                  placeholder="Type specific locality (e.g. Mohan Nagar, Sector 7)..."
                   value={sectorInput}
                   onFocus={() => setIsSectorDropdownOpen(true)}
                   onBlur={() => {
@@ -1069,7 +1069,7 @@ export const BuyerRequirements: React.FC = () => {
                 {isSectorDropdownOpen && (
                   <div className="absolute z-30 left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden py-1 max-h-60 overflow-y-auto">
                     <div className="px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-800/80">
-                      {sectorInput.trim() ? `Matching Sectors (${filteredSectors.length})` : 'Popular / All Sectors'}
+                      {sectorInput.trim() ? `Matching Localities (${filteredSectors.length})` : 'Popular / All Localities'}
                     </div>
                     {filteredSectors.map((s) => {
                       const isAlreadyAdded = selectedSectors.includes(s.id);
@@ -1103,7 +1103,7 @@ export const BuyerRequirements: React.FC = () => {
                           }}
                           className="w-full text-left px-3.5 py-2.5 text-xs sm:text-sm flex items-center gap-2 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/40 font-semibold border-t border-slate-100 dark:border-slate-800"
                         >
-                          <span>+ Add &quot;{sectorInput.trim()}&quot; as specific area</span>
+                          <span>+ Add &quot;{sectorInput.trim()}&quot; as specific locality</span>
                         </button>
                       )}
                   </div>
@@ -1111,10 +1111,10 @@ export const BuyerRequirements: React.FC = () => {
               </div>
             </div>
 
-            {/* Selected Specific Sector Badges */}
+            {/* Selected Specific Locality Badges */}
             {selectedSectors.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Specific Areas:</span>
+                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Specific Localities:</span>
                 {selectedSectors.map((secId) => {
                   const sec = sectors.find((s) => s.id === secId);
                   if (!sec) return null;
@@ -1368,7 +1368,7 @@ export const BuyerRequirements: React.FC = () => {
                   <span>Matching Inventory for {matchingBuyer.name}</span>
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Direct match via match_properties RPC (Budget, Sector, Type). Owner contacts are strictly omitted.
+                  Direct match via match_properties RPC (Budget, Locality, Type). Owner contacts are strictly omitted.
                 </p>
               </div>
               <button
@@ -1405,7 +1405,7 @@ export const BuyerRequirements: React.FC = () => {
                         <span className="font-mono font-bold px-2 py-0.5 rounded bg-white dark:bg-slate-900 border text-brand-700 dark:text-brand-300">
                           {formatPropertyId(p.plot_id)}
                         </span>
-                        <strong className="text-slate-900 dark:text-white">{p.type_name} in {p.sector_name}</strong>
+                        <strong className="text-slate-900 dark:text-white">{formatCategoryTypeName(p.type_name, p.details)} in {p.sector_name}</strong>
                       </div>
                       <p className="text-slate-600 dark:text-slate-400 mt-1">{p.location}</p>
                       {p.area_size && (

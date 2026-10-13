@@ -16,6 +16,8 @@ export interface Sector {
   is_deleted: boolean;
 }
 
+export type Locality = Sector;
+
 export interface PropertyType {
   id: string;
   name: string;
@@ -32,7 +34,9 @@ export interface Property {
   plot_id: string;
   sector_id: string;
   sector_name?: string;
+  locality_name?: string;
   location: string;
+  landmark?: string;
   house_no: string | null;
   price: number;
   type_id: string;

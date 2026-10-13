@@ -37,14 +37,120 @@ export function formatPropertyId(plotId: string | null | undefined): string {
 }
 
 /**
+ * Formats property category + subType into standardized "Residential - Plot", "Commercial - Shop", etc.
+ */
+export function formatCategoryTypeName(typeName?: string | null, details?: string | null): string {
+  if (!typeName) return 'Residential - Plot';
+  const trimmed = typeName.trim();
+
+  // If already formatted as "Category - Type", return directly
+  if (trimmed.includes(' - ')) {
+    return trimmed;
+  }
+
+  const lower = trimmed.toLowerCase();
+  const lowerDetails = (details || '').toLowerCase();
+
+  if (lower === 'plot') {
+    if (lowerDetails.includes('commercial') || lowerDetails.includes('shop')) {
+      return 'Commercial - Plot';
+    }
+    return 'Residential - Plot';
+  }
+
+  if (lower.includes('house') || lower.includes('kothi') || lower.includes('home')) {
+    return 'Residential - House/Kothi';
+  }
+
+  if (lower.includes('flat') || lower.includes('apartment')) {
+    return 'Residential - Flat / Apartment';
+  }
+
+  if (lower.includes('farm')) {
+    return 'Residential - Farmhouse';
+  }
+
+  if (lower.includes('shop') || lower === 'commercial') {
+    return 'Commercial - Shop';
+  }
+
+  if (lower.includes('agri')) {
+    return 'Commercial - Agricultural Land';
+  }
+
+  if (lower.includes('industr')) {
+    return 'Commercial - Industrial';
+  }
+
+  return trimmed;
+}
+
+/**
+ * Extracts Length and Breadth from details text.
+ */
+export function extractDimensions(details?: string | null): { length?: string; breadth?: string } {
+  if (!details) return {};
+
+  const lenMatch = details.match(/Length:\s*([0-9.]+(?:\s*ft)?)/i);
+  const brMatch = details.match(/Breadth:\s*([0-9.]+(?:\s*ft)?)/i);
+  if (lenMatch && brMatch) {
+    const l = lenMatch[1].toLowerCase().includes('ft') ? lenMatch[1] : `${lenMatch[1]} ft`;
+    const b = brMatch[1].toLowerCase().includes('ft') ? brMatch[1] : `${brMatch[1]} ft`;
+    return { length: l, breadth: b };
+  }
+
+  const dimMatch = details.match(/(?:(?:Dim|Dimensions?):\s*)?([0-9.]+)\s*[x*×]\s*([0-9.]+)\s*(?:ft)?/i);
+  if (dimMatch) {
+    return { length: `${dimMatch[1]} ft`, breadth: `${dimMatch[2]} ft` };
+  }
+
+  return {};
+}
+
+/**
+ * Extracts per-unit rate from details text (e.g. Rate: ₹60,000/gaj).
+ */
+export function extractRate(details?: string | null): { rateValue: string; rateUnit: string } | null {
+  if (!details) return null;
+  const rateMatch = details.match(/Rate:\s*₹?([0-9,]+(?:\.[0-9]+)?)\s*(?:\/|\s*per\s*)\s*([a-zA-Z\s]+)/i);
+  if (rateMatch) {
+    const unitRaw = rateMatch[2].trim().toLowerCase();
+    let displayUnit = unitRaw;
+    if (unitRaw === 'gaj') displayUnit = 'gaj';
+    else if (unitRaw === 'sqft' || unitRaw === 'sq ft') displayUnit = 'square feet';
+    else if (unitRaw === 'sqm' || unitRaw === 'sq meter' || unitRaw === 'sq metre') displayUnit = 'square meter';
+    else if (unitRaw === 'acre') displayUnit = 'acre';
+    return {
+      rateValue: rateMatch[1].trim(),
+      rateUnit: displayUnit,
+    };
+  }
+  return null;
+}
+
+/**
+ * Strips technical metadata (Rate, Dimensions, Broker tags) from details string for clean display.
+ */
+export function extractCleanDetails(details?: string | null): string {
+  if (!details) return '';
+  let clean = details;
+  clean = clean.replace(/\[\s*\[?Broker\]?\s*\]/gi, '').replace(/\[Broker\]/gi, '');
+  clean = clean.replace(/\[?\s*Rate:\s*₹?[0-9,.]+\s*(?:\/|\s*per\s*)\s*[a-zA-Z\s]+(?:\s*\|\s*)?\]?/gi, '');
+  clean = clean.replace(/\[?\s*(?:Length:\s*[0-9.]+\s*ft,\s*Breadth:\s*[0-9.]+\s*ft)(?:\s*\|\s*)?\]?/gi, '');
+  clean = clean.replace(/\[?\s*(?:Dim|Dimensions?):\s*[0-9.]+\s*[x*×]\s*[0-9.]+\s*(?:ft)?(?:\s*\|\s*)?\]?/gi, '');
+  clean = clean.replace(/\[\s*\|\s*\]/g, '').replace(/\[\s*\]/g, '');
+  clean = clean.replace(/^\[[^\]]+\]\s*/g, '');
+  clean = clean.replace(/^[\s|–-]+|[\s|–-]+$/g, '').trim();
+  return clean;
+}
+
+/**
  * Converts legacy/compact dimension strings like "Dim: 30x60 ft" or "30*60" into "Length: 30 ft, Breadth: 60 ft".
  */
 export function formatDimensions(text: string): string {
   if (!text) return '';
   return text
-    // Handles [Dim: 30x60 ft] or Dim: 30x60 ft or Dim: 30*60
     .replace(/\[?Dim:\s*(\d+(?:\.\d+)?)\s*[x*×]\s*(\d+(?:\.\d+)?)\s*(?:ft)?\]?/gi, 'Length: $1 ft, Breadth: $2 ft')
-    // Handles Dimensions: 30x60 or 30*60
     .replace(/Dimensions?:\s*(\d+(?:\.\d+)?)\s*[x*×]\s*(\d+(?:\.\d+)?)\s*(?:ft)?/gi, 'Length: $1 ft, Breadth: $2 ft');
 }
 
@@ -53,8 +159,10 @@ export interface PropertyDataToCopy {
   price: number;
   type_name?: string | null;
   location?: string | null;
+  landmark?: string | null;
   house_no?: string | null;
   sector_name?: string | null;
+  locality_name?: string | null;
   area_size?: number | null;
   area_unit?: string | null;
   status?: string | null;
@@ -73,61 +181,84 @@ export interface PropertyCopyOptions {
 }
 
 /**
- * Formats a single property item block:
- * - Labels *Property ID:*, *Details:*, *Owner:* (or *Broker:*), *Contact:* are bold with asterisks (*Label:*)
- * - Values are not bold
- * - Status is excluded
- * - Location is shown, House No only if showHouseNo is true
- * - Dimensions are formatted as "Length: <L> ft, Breadth: <B> ft"
+ * Formats a single property item block according to user specification:
+ * 1. Property ID
+ * 2. Type: Residential - Plot (or other selected)
+ * 3. Length (if available)
+ * 4. Breadth (if available)
+ * 5. Area
+ * 6. Locality
+ * 7. Landmark
+ * 8. House No (if checked)
+ * 9. Phone No (if checked)
+ * 10. Rate per unit (if given) & Price / Total Cost asking (negotiable)
+ * 11. Details (clean details)
  */
 export function formatSinglePropertyItem(
   p: PropertyDataToCopy,
-  options: { showOwnerPhone?: boolean; showLocation?: boolean; showHouseNo?: boolean } = {}
+  options: PropertyCopyOptions = {}
 ): string {
   const propId = formatPropertyId(p.plot_id);
   const priceStr = formatPrice(p.price);
-  const typeStr = p.type_name || 'Property';
-
-  const isBroker = Boolean(p.is_broker || (p.details && /\[Broker\]/i.test(p.details)));
+  const typeStr = formatCategoryTypeName(p.type_name, p.details);
 
   const lines: string[] = [
-    `*Property ID:* ${propId}`,
-    `Price: ${priceStr} asking (negotiable)`,
+    `Property ID: ${propId}`,
     `Type: ${typeStr}`,
   ];
 
-  // Location is shown by default unless explicitly disabled
-  if (options.showLocation !== false && p.location) {
-    lines.push(`Location: ${p.location}`);
+  // Length & Breadth
+  const dims = extractDimensions(p.details);
+  if (dims.length) {
+    lines.push(`Length: ${dims.length}`);
+  }
+  if (dims.breadth) {
+    lines.push(`Breadth: ${dims.breadth}`);
   }
 
-  // House No is only shown if showHouseNo is true (or legacy showLocation is true)
-  const shouldShowHouseNo = options.showHouseNo ?? options.showLocation ?? false;
-  if (shouldShowHouseNo && p.house_no) {
-    lines.push(`House No: ${p.house_no}`);
-  }
-
-  if (p.sector_name && p.sector_name !== p.location) {
-    lines.push(`Sector: ${p.sector_name}`);
-  }
-
+  // Area
   if (p.area_size) {
     lines.push(`Area: ${p.area_size} ${p.area_unit || ''}`.trim());
   }
 
-  // Details: clean up [Broker] tag and format dimensions to Length: ... ft, Breadth: ... ft
-  if (p.details) {
-    let cleanDetails = p.details.replace(/\[Broker\]\s*/gi, '').trim();
-    cleanDetails = formatDimensions(cleanDetails);
-    if (cleanDetails) {
-      lines.push(`*Details:* ${cleanDetails}`);
-    }
+  // Locality (changed from Sector)
+  const locality = p.locality_name || p.sector_name;
+  if (locality) {
+    lines.push(`Locality: ${locality}`);
   }
 
-  if (options.showOwnerPhone && p.phone) {
-    const contactRole = isBroker ? 'Broker' : 'Owner';
-    lines.push(`*${contactRole}:* ${p.contact_name || contactRole}`);
-    lines.push(`*Contact:* ${normalizePhone(p.phone).formatted || p.phone}`);
+  // Landmark (changed from Location)
+  const landmark = p.landmark || p.location;
+  if (options.showLocation !== false && landmark) {
+    lines.push(`Landmark: ${landmark}`);
+  }
+
+  // House No (only if checked)
+  const shouldShowHouseNo = Boolean(options.showHouseNo);
+  if (shouldShowHouseNo && p.house_no) {
+    lines.push(`House No: ${p.house_no}`);
+  }
+
+  // Phone No (only if checked)
+  const shouldShowPhone = Boolean(options.showOwnerPhone);
+  if (shouldShowPhone && p.phone) {
+    const formattedPhone = normalizePhone(p.phone).formatted || p.phone;
+    lines.push(`Phone: ${formattedPhone}`);
+  }
+
+  // Price & Rate logic
+  const rateInfo = extractRate(p.details);
+  if (rateInfo) {
+    lines.push(`Price per ${rateInfo.rateUnit}: ₹${rateInfo.rateValue}`);
+    lines.push(`Total Cost: ${priceStr} asking (negotiable)`);
+  } else {
+    lines.push(`Price: ${priceStr} asking (negotiable)`);
+  }
+
+  // Details: clean notes without redundant rate and dimensions
+  const cleanDetails = extractCleanDetails(p.details);
+  if (cleanDetails) {
+    lines.push(`Details: ${cleanDetails}`);
   }
 
   return lines.join('\n');
@@ -136,6 +267,7 @@ export function formatSinglePropertyItem(
 /**
  * Formats one or multiple properties into a clean text block for WhatsApp or clipboard copying.
  * Appends the Interested / Call/whatsapp CTA footer if includeContactCta is true (default true).
+ * If multiple records are copied, the CTA footer is appended only ONCE at the very end.
  */
 export function formatPropertiesText(
   properties: PropertyDataToCopy[],

@@ -114,7 +114,7 @@ export const Settings: React.FC = () => {
         setSectors(updated);
         localStorage.setItem('re_mock_sectors', JSON.stringify(updated));
         setNewSectorName('');
-        showToast({ type: 'success', title: 'Sector Added', message: cleanName });
+        showToast({ type: 'success', title: 'Locality Added', message: cleanName });
         return;
       }
 
@@ -122,10 +122,10 @@ export const Settings: React.FC = () => {
       if (error) throw error;
 
       setNewSectorName('');
-      showToast({ type: 'success', title: 'Sector Added', message: cleanName });
+      showToast({ type: 'success', title: 'Locality Added', message: cleanName });
       loadData();
     } catch (err: any) {
-      showToast({ type: 'error', title: 'Failed to Add Sector', message: err.message });
+      showToast({ type: 'error', title: 'Failed to Add Locality', message: err.message });
     }
   };
 
@@ -140,7 +140,7 @@ export const Settings: React.FC = () => {
         setSectors(updated);
         localStorage.setItem('re_mock_sectors', JSON.stringify(updated));
         setEditingSectorId(null);
-        showToast({ type: 'success', title: 'Sector Updated', message: cleanName });
+        showToast({ type: 'success', title: 'Locality Updated', message: cleanName });
         return;
       }
 
@@ -148,7 +148,7 @@ export const Settings: React.FC = () => {
       if (error) throw error;
 
       setEditingSectorId(null);
-      showToast({ type: 'success', title: 'Sector Updated', message: cleanName });
+      showToast({ type: 'success', title: 'Locality Updated', message: cleanName });
       loadData();
     } catch (err: any) {
       showToast({ type: 'error', title: 'Update Failed', message: err.message });
@@ -162,14 +162,14 @@ export const Settings: React.FC = () => {
         const updated = sectors.filter((s) => s.id !== id);
         setSectors(updated);
         localStorage.setItem('re_mock_sectors', JSON.stringify(updated));
-        showToast({ type: 'success', title: 'Sector Deleted', message: 'Sector removed' });
+        showToast({ type: 'success', title: 'Locality Deleted', message: 'Locality removed' });
         return;
       }
 
       const { error } = await supabase.from('sectors').update({ is_deleted: true }).eq('id', id);
       if (error) throw error;
 
-      showToast({ type: 'success', title: 'Sector Deleted', message: 'Sector soft-deleted' });
+      showToast({ type: 'success', title: 'Locality Deleted', message: 'Locality soft-deleted' });
       loadData();
     } catch (err: any) {
       showToast({ type: 'error', title: 'Delete Failed', message: err.message });
@@ -319,7 +319,7 @@ export const Settings: React.FC = () => {
           <span>Dealer Administration</span>
         </h1>
         <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-          Manage sectors, property classifications, and complete data exports
+          Manage localities, property classifications, and complete data exports
         </p>
       </div>
 
@@ -331,7 +331,7 @@ export const Settings: React.FC = () => {
             <span>Complete Business Data Backup</span>
           </h2>
           <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 max-w-md">
-            Download all inventory (including owner contacts), buyer preferences, and sectors formatted with UTF-8 BOM for Microsoft Excel.
+            Download all inventory (including owner contacts), buyer preferences, and localities formatted with UTF-8 BOM for Microsoft Excel.
           </p>
         </div>
 
@@ -346,18 +346,18 @@ export const Settings: React.FC = () => {
         </button>
       </div>
 
-      {/* Sector Management */}
+      {/* Locality Management */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
         <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
           <MapPin className="w-5 h-5 text-brand-600" />
-          <span>Manage Sectors & Colonies</span>
+          <span>Manage Localities & Colonies</span>
         </h2>
 
-        {/* Add Sector Form */}
+        {/* Add Locality Form */}
         <form onSubmit={handleAddSector} className="flex gap-2">
           <input
             type="text"
-            placeholder="Add new sector name (e.g. Sector 57)"
+            placeholder="Add new locality name (e.g. Sector 57, Urban Estate)"
             value={newSectorName}
             onChange={(e) => setNewSectorName(e.target.value)}
             className="flex-1 py-2 px-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm dark:text-white"
@@ -367,11 +367,11 @@ export const Settings: React.FC = () => {
             className="py-2 px-4 bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-semibold text-xs rounded-xl flex items-center gap-1.5 min-h-[44px]"
           >
             <Plus className="w-4 h-4" />
-            <span>Add Sector</span>
+            <span>Add Locality</span>
           </button>
         </form>
 
-        {/* Sectors Grid */}
+        {/* Localities Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
           {sectors.map((s) => (
             <div

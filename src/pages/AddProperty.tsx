@@ -38,8 +38,51 @@ export const commercialOptions: { id: PropertySubType; label: string }[] = [
   { id: 'other', label: 'Other' },
 ];
 
+// Build composite category - subType name (e.g. "Residential - Plot", "Commercial - Shop")
+export function buildCompositeTypeName(
+  category: PropertyCategory,
+  subType: PropertySubType,
+  customOtherText?: string
+): string {
+  const catPrefix = category === 'residential' ? 'Residential' : 'Commercial';
+  if (subType === 'other') {
+    const custom = (customOtherText || '').trim();
+    return custom ? `${catPrefix} - ${custom}` : `${catPrefix} - Other`;
+  }
+  if (subType === 'plot') {
+    return `${catPrefix} - Plot`;
+  }
+  if (subType === 'home') {
+    return 'Residential - House/Kothi';
+  }
+  if (subType === 'flat') {
+    return 'Residential - Flat / Apartment';
+  }
+  if (subType === 'farmhouse') {
+    return 'Residential - Farmhouse';
+  }
+  if (subType === 'shop') {
+    return 'Commercial - Shop';
+  }
+  if (subType === 'agriculture') {
+    return 'Commercial - Agricultural Land';
+  }
+  if (subType === 'industry') {
+    return 'Commercial - Industrial';
+  }
+  return `${catPrefix} - ${subType}`;
+}
+
 // Helper to match built-in subType to an existing PropertyType from database/mock
-export const getTypeIdForSubType = (subType: PropertySubType, typesList: PropertyType[]): string => {
+export const getTypeIdForSubType = (
+  subType: PropertySubType,
+  typesList: PropertyType[],
+  category: PropertyCategory = 'residential'
+): string => {
+  const compositeName = buildCompositeTypeName(category, subType).toLowerCase();
+  const exact = typesList.find((t) => t.name.toLowerCase() === compositeName);
+  if (exact) return exact.id;
+
   if (subType === 'plot') {
     return typesList.find((t) => t.name.toLowerCase() === 'plot' || t.name.toLowerCase().includes('plot'))?.id || '';
   }
@@ -511,7 +554,7 @@ export const AddProperty: React.FC = () => {
     const newErrors: Record<string, string> = {};
 
     if (!sectorInput.trim()) {
-      newErrors.sector = 'Sector / Colony is required';
+      newErrors.sector = 'Locality is required';
     }
 
     const parsedPrice = parsePriceInput(priceValue, priceUnit);
@@ -524,15 +567,18 @@ export const AddProperty: React.FC = () => {
         newErrors.otherType = 'Please fill the other property type';
       }
     } else {
-      const tid = selectedTypeId || getTypeIdForSubType(selectedSubType, propertyTypes);
+      const tid = selectedTypeId || getTypeIdForSubType(selectedSubType, propertyTypes, selectedCategory);
       if (!tid) {
         newErrors.type = 'Please select a property type';
       }
     }
 
-    const normPhone = normalizePhone(ownerPhone);
-    if (!normPhone.isValid) {
-      newErrors.phone = normPhone.error || 'Valid 10-digit Indian phone number required';
+    // Phone is optional for both owner and broker
+    if (ownerPhone.trim()) {
+      const normPhone = normalizePhone(ownerPhone);
+      if (!normPhone.isValid) {
+        newErrors.phone = normPhone.error || 'Valid 10-digit Indian phone number required';
+      }
     }
 
     setErrors(newErrors);
@@ -573,7 +619,7 @@ export const AddProperty: React.FC = () => {
             .single();
 
           if (secError) {
-            throw new Error(`Failed to create sector: ${secError.message}`);
+            throw new Error(`Failed to create locality: ${secError.message}`);
           }
           finalSectorId = newSecData.id;
           invalidateReferenceCache();
@@ -582,7 +628,7 @@ export const AddProperty: React.FC = () => {
       }
 
       const parsedPrice = parsePriceInput(priceValue, priceUnit)!;
-      const cleanPhone = normalizePhone(ownerPhone).raw;
+      const cleanPhone = ownerPhone.trim() ? normalizePhone(ownerPhone).raw : null;
 
       // Build metadata prefix for dimensions, rate, and broker if entered
       const metaParts: string[] = [];
@@ -603,43 +649,42 @@ export const AddProperty: React.FC = () => {
           : metaPrefix
         : details.trim() || null;
 
-      // Resolve final type ID (supporting dynamic 'other' custom type)
+      // Resolve final type ID with composite name (e.g. "Residential - Plot", "Commercial - Shop")
+      const targetTypeName = buildCompositeTypeName(selectedCategory, selectedSubType, otherTypeText);
       let finalTypeId = selectedTypeId;
-      if (selectedSubType === 'other') {
-        const cleanTypeName = otherTypeText.trim();
-        const existingType = propertyTypes.find(
-          (t) => t.name.trim().toLowerCase() === cleanTypeName.toLowerCase()
-        );
-        if (existingType) {
-          finalTypeId = existingType.id;
+
+      const existingType = propertyTypes.find(
+        (t) => t.name.trim().toLowerCase() === targetTypeName.toLowerCase()
+      );
+      if (existingType) {
+        finalTypeId = existingType.id;
+      } else {
+        if (!isSupabaseConfigured) {
+          const newType: PropertyType = {
+            id: 'type-' + Date.now(),
+            name: targetTypeName,
+            sort_order: propertyTypes.length + 1,
+          };
+          setPropertyTypes((prev) => [...prev, newType]);
+          finalTypeId = newType.id;
         } else {
-          if (!isSupabaseConfigured) {
-            const newType: PropertyType = {
-              id: 'type-' + Date.now(),
-              name: cleanTypeName,
-              sort_order: propertyTypes.length + 1,
-            };
-            setPropertyTypes((prev) => [...prev, newType]);
-            finalTypeId = newType.id;
-          } else {
+          try {
             const { data: newTypeData, error: typeCreateError } = await supabase
               .from('property_types')
-              .insert({ name: cleanTypeName, sort_order: propertyTypes.length + 1 })
+              .insert({ name: targetTypeName, sort_order: propertyTypes.length + 1 })
               .select('id, name, sort_order')
               .single();
 
-            if (typeCreateError) {
-              throw new Error(`Failed to create property type: ${typeCreateError.message}`);
-            }
-            if (newTypeData) {
+            if (!typeCreateError && newTypeData) {
               setPropertyTypes((prev) => [...prev, newTypeData]);
               finalTypeId = newTypeData.id;
             }
+          } catch {
+            // fallback
           }
-        }
-      } else {
-        if (!finalTypeId) {
-          finalTypeId = getTypeIdForSubType(selectedSubType, propertyTypes);
+          if (!finalTypeId) {
+            finalTypeId = getTypeIdForSubType(selectedSubType, propertyTypes, selectedCategory);
+          }
         }
       }
 
@@ -657,11 +702,13 @@ export const AddProperty: React.FC = () => {
                   ...p,
                   sector_id: finalSectorId,
                   sector_name: sectors.find((s) => s.id === finalSectorId)?.name,
+                  locality_name: sectors.find((s) => s.id === finalSectorId)?.name,
                   location: location.trim(),
+                  landmark: location.trim(),
                   house_no: houseNo.trim() || null,
                   price: parsedPrice,
                   type_id: finalTypeId,
-                  type_name: propertyTypes.find((t) => t.id === finalTypeId)?.name || otherTypeText.trim(),
+                  type_name: targetTypeName,
                   area_size: areaSize ? Number(areaSize) : null,
                   area_unit: areaUnit,
                   details: finalDetails,
@@ -685,11 +732,13 @@ export const AddProperty: React.FC = () => {
             plot_id: newPlotId,
             sector_id: finalSectorId,
             sector_name: sectors.find((s) => s.id === finalSectorId)?.name,
+            locality_name: sectors.find((s) => s.id === finalSectorId)?.name,
             location: location.trim(),
+            landmark: location.trim(),
             house_no: houseNo.trim() || null,
             price: parsedPrice,
             type_id: finalTypeId,
-            type_name: propertyTypes.find((t) => t.id === finalTypeId)?.name || otherTypeText.trim(),
+            type_name: targetTypeName,
             area_size: areaSize ? Number(areaSize) : null,
             area_unit: areaUnit,
             details: finalDetails,
@@ -727,7 +776,7 @@ export const AddProperty: React.FC = () => {
           p_details: finalDetails,
           p_status: status,
           p_contact_name: ownerName.trim() || null,
-          p_phone: cleanPhone,
+          p_phone: cleanPhone || '',
           p_is_broker: isBroker,
         };
 
@@ -735,16 +784,42 @@ export const AddProperty: React.FC = () => {
         if (updateError && (updateError.message?.includes('function') || updateError.code === 'PGRST202')) {
           delete updateParams.p_is_broker;
           const retry = await supabase.rpc('update_property', updateParams);
-          if (retry.error) throw retry.error;
+          if (retry.error) updateError = retry.error;
+          else updateError = null;
+        }
+        if (updateError) {
+          const { error: directUpdateErr } = await supabase
+            .from('properties')
+            .update({
+              sector_id: finalSectorId,
+              location: location.trim(),
+              house_no: houseNo.trim() || null,
+              price: parsedPrice,
+              type_id: finalTypeId,
+              area_size: areaSize ? Number(areaSize) : null,
+              area_unit: areaUnit || null,
+              details: finalDetails,
+              status: status,
+              is_broker: isBroker,
+            })
+            .eq('id', editingPropertyId);
+
+          if (directUpdateErr) throw updateError;
+          if (cleanPhone) {
+            await supabase.from('property_contacts').upsert({
+              property_id: editingPropertyId,
+              contact_name: ownerName.trim() || null,
+              phone: cleanPhone,
+            }).then();
+          }
+        } else {
           await supabase.from('properties').update({ is_broker: isBroker }).eq('id', editingPropertyId).then();
-        } else if (updateError) {
-          throw updateError;
         }
 
         showToast({
           type: 'success',
           title: 'Property Updated',
-          message: 'Property details and contact updated successfully.',
+          message: 'Property details updated successfully.',
         });
       } else {
         const createParams: any = {
@@ -758,7 +833,7 @@ export const AddProperty: React.FC = () => {
           p_details: finalDetails,
           p_status: status,
           p_contact_name: ownerName.trim() || null,
-          p_phone: cleanPhone,
+          p_phone: cleanPhone || '',
           p_is_broker: isBroker,
         };
 
@@ -766,13 +841,41 @@ export const AddProperty: React.FC = () => {
         if (createError && (createError.message?.includes('function') || createError.code === 'PGRST202')) {
           delete createParams.p_is_broker;
           const retry = await supabase.rpc('create_property', createParams);
-          if (retry.error) throw retry.error;
-          data = retry.data;
-          if (data?.[0]?.id) {
-            await supabase.from('properties').update({ is_broker: isBroker }).eq('id', data[0].id).then();
+          if (retry.error) createError = retry.error;
+          else {
+            createError = null;
+            data = retry.data;
           }
-        } else if (createError) {
-          throw createError;
+        }
+        if (createError) {
+          const { data: directData, error: directErr } = await supabase
+            .from('properties')
+            .insert({
+              sector_id: finalSectorId,
+              location: location.trim(),
+              house_no: houseNo.trim() || null,
+              price: parsedPrice,
+              type_id: finalTypeId,
+              area_size: areaSize ? Number(areaSize) : null,
+              area_unit: areaUnit || null,
+              details: finalDetails,
+              status: status,
+              is_broker: isBroker,
+            })
+            .select('id, plot_id')
+            .single();
+
+          if (directErr) throw createError;
+          data = [directData];
+          if (cleanPhone) {
+            await supabase.from('property_contacts').insert({
+              property_id: directData.id,
+              contact_name: ownerName.trim() || null,
+              phone: cleanPhone,
+            }).then();
+          }
+        } else if (data?.[0]?.id) {
+          await supabase.from('properties').update({ is_broker: isBroker }).eq('id', data[0].id).then();
         }
 
         const rawPlotId = data?.[0]?.plot_id || 'JSK-0000';
@@ -1055,13 +1158,13 @@ export const AddProperty: React.FC = () => {
             </div>
           </div>
 
-          {/* Line 3: Sector / Colony (Left) & Location / Address (Right) */}
+          {/* Line 3: Locality (Left) & Landmark (Right) */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Left: Sector / Colony (Fast Direct Input with Datalist Suggestions) */}
+            {/* Left: Locality (Fast Direct Input with Datalist Suggestions) */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                  Sector / Colony <span className="text-rose-500">*</span>
+                  Locality <span className="text-rose-500">*</span>
                 </label>
                 <span className="text-[11px] text-slate-400">Type or pick from list</span>
               </div>
@@ -1069,7 +1172,7 @@ export const AddProperty: React.FC = () => {
               <div className="relative">
                 <input
                   type="text"
-                  placeholder="e.g. Sector 7, Sector 14, or Mohan Nagar"
+                  placeholder="e.g. Sector 7, Urban Estate, or Mohan Nagar"
                   value={sectorInput}
                   onFocus={() => setIsSectorDropdownOpen(true)}
                   onBlur={() => {
@@ -1091,17 +1194,17 @@ export const AddProperty: React.FC = () => {
                       setIsSectorDropdownOpen(false);
                     }}
                     className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                    title="Clear sector"
+                    title="Clear locality"
                   >
                     <X className="w-4 h-4" />
                   </button>
                 )}
 
-                {/* Instant Suggestion Dropdown as user types "sec", "moh", etc. */}
+                {/* Instant Suggestion Dropdown as user types */}
                 {isSectorDropdownOpen && filteredSectors.length > 0 && (
                   <div className="absolute z-30 left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden py-1 max-h-60 overflow-y-auto">
                     <div className="px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-800/80">
-                      {sectorInput.trim() ? `Matching Sectors (${filteredSectors.length})` : 'All Available Sectors'}
+                      {sectorInput.trim() ? `Matching Localities (${filteredSectors.length})` : 'All Available Localities'}
                     </div>
                     {filteredSectors.map((s) => (
                       <button
@@ -1133,18 +1236,18 @@ export const AddProperty: React.FC = () => {
               {errors.sector && <p className="text-xs text-rose-500 mt-1">{errors.sector}</p>}
             </div>
 
-            {/* Right: Location / Address */}
+            {/* Right: Landmark */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                  Location / Address <span className="text-slate-400 font-normal lowercase text-[11px]">(optional)</span>
+                  Landmark <span className="text-slate-400 font-normal lowercase text-[11px]">(optional)</span>
                 </label>
-                <span className="text-[11px] text-slate-400">Street / landmark</span>
+                <span className="text-[11px] text-slate-400">Nearby landmark or street</span>
               </div>
               <div className="flex gap-2">
                 <input
                   type="text"
-                  placeholder="e.g. Near Community Center, 60ft (Optional)"
+                  placeholder="e.g. Near Community Center, 60ft Road"
                   value={location}
                   onChange={(e) => setLocation(e.target.value)}
                   className={`flex-1 py-2.5 px-3 bg-slate-50 dark:bg-slate-800 border rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white ${
@@ -1273,15 +1376,15 @@ export const AddProperty: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {/* Left: Phone No Field */}
+              {/* Left: Phone No Field (Optional for both Owner & Broker) */}
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
-                  {isBroker ? 'Broker Mobile Number' : 'Owner Mobile Number'} <span className="text-rose-500">*</span>
+                  {isBroker ? 'Broker Mobile Number' : 'Owner Mobile Number'}{' '}
+                  <span className="text-slate-400 font-normal text-[11px]">(Optional)</span>
                 </label>
                 <input
                   type="tel"
-                  required
-                  placeholder="10-digit mobile (e.g. 9876543210)"
+                  placeholder="10-digit mobile (optional, e.g. 9876543210)"
                   value={ownerPhone}
                   onChange={(e) => setOwnerPhone(e.target.value)}
                   className={`w-full py-2.5 px-3 bg-white dark:bg-slate-900 border rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white font-mono ${

@@ -164,15 +164,19 @@ DECLARE
   v_plot_id TEXT;
   v_clean_phone TEXT;
 BEGIN
-  v_clean_phone := regexp_replace(p_phone, '[^0-9]', '', 'g');
-  IF length(v_clean_phone) = 12 AND v_clean_phone LIKE '91%' THEN
-    v_clean_phone := substr(v_clean_phone, 3);
-  ELSIF length(v_clean_phone) = 11 AND v_clean_phone LIKE '0%' THEN
-    v_clean_phone := substr(v_clean_phone, 2);
-  END IF;
+  IF p_phone IS NOT NULL AND trim(p_phone) != '' THEN
+    v_clean_phone := regexp_replace(p_phone, '[^0-9]', '', 'g');
+    IF length(v_clean_phone) = 12 AND v_clean_phone LIKE '91%' THEN
+      v_clean_phone := substr(v_clean_phone, 3);
+    ELSIF length(v_clean_phone) = 11 AND v_clean_phone LIKE '0%' THEN
+      v_clean_phone := substr(v_clean_phone, 2);
+    END IF;
 
-  IF v_clean_phone !~ '^[6-9][0-9]{9}$' THEN
-    RAISE EXCEPTION 'Invalid phone number format: %', p_phone;
+    IF v_clean_phone !~ '^[6-9][0-9]{9}$' THEN
+      RAISE EXCEPTION 'Invalid phone number format: %', p_phone;
+    END IF;
+  ELSE
+    v_clean_phone := NULL;
   END IF;
 
   INSERT INTO public.properties (
@@ -185,8 +189,10 @@ BEGIN
   )
   RETURNING properties.id, properties.plot_id INTO v_property_id, v_plot_id;
 
-  INSERT INTO public.property_contacts (property_id, contact_name, phone)
-  VALUES (v_property_id, NULLIF(trim(p_contact_name), ''), v_clean_phone);
+  IF v_clean_phone IS NOT NULL THEN
+    INSERT INTO public.property_contacts (property_id, contact_name, phone)
+    VALUES (v_property_id, NULLIF(trim(p_contact_name), ''), v_clean_phone);
+  END IF;
 
   RETURN QUERY SELECT v_property_id, v_plot_id;
 END;
@@ -215,15 +221,19 @@ AS $$
 DECLARE
   v_clean_phone TEXT;
 BEGIN
-  v_clean_phone := regexp_replace(p_phone, '[^0-9]', '', 'g');
-  IF length(v_clean_phone) = 12 AND v_clean_phone LIKE '91%' THEN
-    v_clean_phone := substr(v_clean_phone, 3);
-  ELSIF length(v_clean_phone) = 11 AND v_clean_phone LIKE '0%' THEN
-    v_clean_phone := substr(v_clean_phone, 2);
-  END IF;
+  IF p_phone IS NOT NULL AND trim(p_phone) != '' THEN
+    v_clean_phone := regexp_replace(p_phone, '[^0-9]', '', 'g');
+    IF length(v_clean_phone) = 12 AND v_clean_phone LIKE '91%' THEN
+      v_clean_phone := substr(v_clean_phone, 3);
+    ELSIF length(v_clean_phone) = 11 AND v_clean_phone LIKE '0%' THEN
+      v_clean_phone := substr(v_clean_phone, 2);
+    END IF;
 
-  IF v_clean_phone !~ '^[6-9][0-9]{9}$' THEN
-    RAISE EXCEPTION 'Invalid phone number format: %', p_phone;
+    IF v_clean_phone !~ '^[6-9][0-9]{9}$' THEN
+      RAISE EXCEPTION 'Invalid phone number format: %', p_phone;
+    END IF;
+  ELSE
+    v_clean_phone := NULL;
   END IF;
 
   UPDATE public.properties
@@ -243,12 +253,14 @@ BEGIN
     RAISE EXCEPTION 'Property not found or deleted';
   END IF;
 
-  INSERT INTO public.property_contacts (property_id, contact_name, phone)
-  VALUES (p_id, NULLIF(trim(p_contact_name), ''), v_clean_phone)
-  ON CONFLICT (property_id) DO UPDATE
-  SET
-    contact_name = EXCLUDED.contact_name,
-    phone = EXCLUDED.phone;
+  IF v_clean_phone IS NOT NULL THEN
+    INSERT INTO public.property_contacts (property_id, contact_name, phone)
+    VALUES (p_id, NULLIF(trim(p_contact_name), ''), v_clean_phone)
+    ON CONFLICT (property_id) DO UPDATE
+    SET
+      contact_name = EXCLUDED.contact_name,
+      phone = EXCLUDED.phone;
+  END IF;
 
   RETURN TRUE;
 END;
